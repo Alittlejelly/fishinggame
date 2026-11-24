@@ -11,7 +11,7 @@
       "media/v11_t.png"
     ],
     "icon": "media/123.png",
-    "cover": "media/画板 2.jpg",
+    "cover": "media/画板 2 副本.jpg",
     "author": [
       {
         "name": "bandbbs_83349",
@@ -30,6 +30,36 @@
     "xmb10p": {
       "version": "1.0.0",
       "file_name": "downloads/com.cyh.fishinggame.release.1.0.0.rpk",
+      "versionCode": 100
+    },
+    "xmb9p": {
+      "version": "1.0.0",
+      "file_name": "downloads/com.cyh.fishinggame.release.1.0.0-xmb9p.rpk",
+      "versionCode": 100
+    },
+    "xmb11nfc": {
+      "version": "1.0.0",
+      "file_name": "downloads/com.cyh.fishinggame.release.1.0.0-xmb9p.rpk",
+      "versionCode": 100
+    },
+    "xmb11": {
+      "version": "1.0.0",
+      "file_name": "downloads/com.cyh.fishinggame.release.1.0.0-xmb9p.rpk",
+      "versionCode": 100
+    },
+    "xmb10nfc": {
+      "version": "1.0.0",
+      "file_name": "downloads/com.cyh.fishinggame.release.1.0.0-xmb9p.rpk",
+      "versionCode": 100
+    },
+    "xmb10": {
+      "version": "1.0.0",
+      "file_name": "downloads/com.cyh.fishinggame.release.1.0.0-xmb9p.rpk",
+      "versionCode": 100
+    },
+    "xmb9": {
+      "version": "1.0.0",
+      "file_name": "downloads/com.cyh.fishinggame.release.1.0.0-xmb9p.rpk",
       "versionCode": 100
     }
   },
