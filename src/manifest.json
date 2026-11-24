@@ -1,0 +1,43 @@
+{
+  "package": "com.example.bandnote",
+  "name": "像素钓鱼",
+  "icon": "/common/logo.png",
+  "versionName": "1.0.0",
+  "versionCode": 100,
+  "minAPILevel": 2,
+  "deviceTypeList": ["watch", "band"],
+  "features": [
+    { "name": "system.storage" },
+    { "name": "system.router" },
+    { "name": "system.brightness" },
+    { "name": "system.device" }
+  ],
+  "config": {
+    "logLevel": "log",
+    "designWidth": 336
+  },
+  "router": {
+    "entry": "pages/fishing",
+    "pages": {
+      "pages/fishing": {
+        "component": "fishing",
+        "path": "/"
+      },
+      "pages/about": {
+        "component": "about",
+        "path": "/about"
+      },
+      "pages/level": {
+        "component": "level",
+        "path": "/level"
+      },
+      "pages/tank": {
+        "component": "tank",
+        "path": "/tank"
+      }
+    }
+  },
+  "display": {
+    "backgroundColor": "#0b0f0c"
+  }
+}

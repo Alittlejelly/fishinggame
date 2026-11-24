@@ -1,0 +1,3502 @@
+<template>
+  <div class="page" style="background-color: {{sky}}; height: {{vh}}px;" onclick="onTap"
+    ontouchstart="onTouchStart" ontouchend="onTouchEnd" onswipe="onSwipe">
+
+    <!-- ==================== 地图选择 ==================== -->
+    <div class="sel" if="{{phase === 'select'}}" style="height: {{vh}}px;">
+      <div class="sel-head" style="margin-top: {{headTop}}px;">
+        <text class="sel-title" style="font-size: {{cardS.titleSize}}px;">像素钓鱼</text>
+        <!-- 副标题位置改成等级行：不额外占高度，点一下进等级页。
+             窄屏字号放大到 22 之后，"总积分"三个字会把这一行顶出屏幕右边，
+             所以窄屏只写数字（含义在等级页里有完整说明）。 -->
+        <text class="sel-sub" if="{{!narrow}}" style="font-size: {{cardS.subSize}}px; color: {{lvColor}};" onclick="openLevel">LV {{lvLevel}} · {{lvTier}} · 总积分 {{lvTotal}}</text>
+        <text class="sel-sub" if="{{narrow}}" style="font-size: {{cardS.subSize}}px; color: {{lvColor}};" onclick="openLevel">LV {{lvLevel}} · {{lvTier}} · {{lvTotal}}</text>
+      </div>
+
+      <!-- 七张地图一屏放不下：用 list 纵向滚动，滚到哪张点哪张。
+           卡片尺寸/字号全从 cardS 读（见 setViewport / cardSizes）：
+           宽屏 336x480 是设计稿原值，窄屏（手环 11）是放大版，一屏只露 4 张。 -->
+      <list class="cards" style="height: {{cardsH}}px;">
+        <list-item class="card-cell" type="map" for="{{maps}}" style="height: {{cardS.cellH}}px;">
+          <div class="card" style="width: {{cardS.cardW}}px; height: {{cardS.cardH}}px; margin-left: {{cardS.cardMl}}px; border-color: {{$item.border}}; opacity: {{$item.opacity}};" onclick="selectMap($idx)">
+            <!-- 像素小预览框 -->
+            <div class="pv" style="width: {{cardS.pv}}px; height: {{cardS.pv}}px; background-color: {{$item.sky}};">
+              <div class="pv-water" style="top: {{cardS.pvWaterTop}}px; width: {{cardS.pv}}px; height: {{cardS.pvWaterH}}px; background-color: {{$item.water}};"></div>
+              <div class="pv-deep" style="top: {{cardS.pvDeepTop}}px; width: {{cardS.pv}}px; height: {{cardS.pvDeepH}}px; background-color: {{$item.deep}};"></div>
+              <div class="pv-wave1" style="top: {{cardS.pvWaveY}}px; width: {{cardS.pvWaveW1}}px; background-color: {{$item.accent}};"></div>
+              <div class="pv-wave2" style="left: {{cardS.pvWaveX2}}px; top: {{cardS.pvWaveY}}px; width: {{cardS.pvWaveW2}}px; background-color: {{$item.accent}};"></div>
+              <div class="pv-tail" style="left: {{cardS.pvTailX}}px; top: {{cardS.pvTailY}}px; width: {{cardS.pvTailW}}px; height: {{cardS.pvTailH}}px; background-color: {{$item.fishFin}};"></div>
+              <div class="pv-fish" style="left: {{cardS.pvFishX}}px; top: {{cardS.pvFishY}}px; width: {{cardS.pvFishW}}px; height: {{cardS.pvFishH}}px; background-color: {{$item.fishBody}};"></div>
+              <div class="pv-eye" style="left: {{cardS.pvEyeX}}px; top: {{cardS.pvEyeY}}px; width: {{cardS.pvEyeS}}px; height: {{cardS.pvEyeS}}px;"></div>
+              <!-- 未解锁：预览图压一层暗色 + 一把锁 -->
+              <div class="pv-lock" if="{{$item.locked}}" style="width: {{cardS.pv}}px; height: {{cardS.pv}}px;">
+                <text class="pv-lock-t" style="width: {{cardS.pv}}px; font-size: {{cardS.pvLockT}}px;">锁</text>
+              </div>
+            </div>
+            <div class="card-info" style="width: {{cardS.infoW}}px;">
+              <text class="card-name" style="font-size: {{cardS.nameSize}}px; color: {{$item.accent}};">{{$item.title}}</text>
+              <text class="card-desc" style="font-size: {{cardS.descSize}}px; margin-top: {{cardS.descMt}}px; color: {{$item.descColor}};">{{$item.descLine}}</text>
+              <!-- 星级和最高分：宽屏并排一行；窄屏字大放不下，改竖排两行 -->
+              <div class="card-row" style="width: {{cardS.infoW}}px; height: {{cardS.rowH}}px; margin-top: {{cardS.rowMt}}px; flex-direction: {{cardS.rowDir}}; align-items: {{cardS.rowAlign}};">
+                <text class="card-star" style="font-size: {{cardS.starSize}}px; color: {{$item.accent}};">{{$item.stars}}</text>
+                <text class="card-best" style="font-size: {{cardS.bestSize}}px; margin-left: {{cardS.bestMl}}px;">{{$item.bestLine}}</text>
+              </div>
+            </div>
+          </div>
+        </list-item>
+      </list>
+
+      <!-- 底部入口：等级 / 鱼缸 / 关于（居中胶囊，跟手环系统里那种按钮一致）。
+           宽屏（336x480）一行三个，总宽 324。
+           窄屏（手环 11）改上下两行：上「等级 + 鱼缸」，下「关于」。
+           三个挤在 212 物理宽里，每个只有 55~72 物理宽，高 52 也没用 ——
+           手指横着放不下，按「关于」会蹭到鱼缸。分行后每个宽 82~100 物理、高 52 物理。
+           ★ 两块「关于」是同一颗按钮的两种摆法，靠 cardS.twoRows 二选一，
+             改文案/配色时要两边一起改。 -->
+      <div class="entry-wrap" style="margin-top: {{cardS.entryMt}}px;">
+        <div class="entry-row">
+          <div class="entry" style="width: {{cardS.entryW}}px; height: {{cardS.entryH}}px; border-radius: {{cardS.entryR}}px; border-color: {{lvColor}};" onclick="openLevel">
+            <text class="entry-t" style="width: {{cardS.entryTextW}}px; font-size: {{cardS.entrySize}}px; color: {{lvColor}};">等级</text>
+          </div>
+          <div class="entry" style="width: {{cardS.entryWBig}}px; height: {{cardS.entryH}}px; border-radius: {{cardS.entryR}}px; border-color: #f7c948;" onclick="openTank">
+            <text class="entry-t3" style="width: {{cardS.entryTextWBig}}px; font-size: {{cardS.entrySize}}px; color: #f7c948;">{{cardS.bigLabel}}</text>
+          </div>
+          <div class="entry" if="{{!cardS.twoRows}}" style="width: {{cardS.entryWAbout}}px; height: {{cardS.entryH}}px; border-radius: {{cardS.entryR}}px; border-color: {{accent}};" onclick="openAbout">
+            <text class="entry-t3" style="width: {{cardS.entryTextWAbout}}px; font-size: {{cardS.entrySize}}px; color: {{accent}};">关于</text>
+          </div>
+        </div>
+        <!-- 窄屏第二行：关于 -->
+        <div class="entry-row" if="{{cardS.twoRows}}" style="margin-top: {{cardS.entryGap}}px;">
+          <div class="entry" style="width: {{cardS.entryWAbout}}px; height: {{cardS.entryH}}px; border-radius: {{cardS.entryR}}px; border-color: {{accent}};" onclick="openAbout">
+            <text class="entry-t3" style="width: {{cardS.entryTextWAbout}}px; font-size: {{cardS.entrySize}}px; color: {{accent}};">关于</text>
+          </div>
+        </div>
+      </div>
+      <!-- 底部安全区：**必须是一个占位的空 div，不能写成 .sel 的 padding-bottom**。
+           Vela 的 div 是 content-box（CSS 默认），height 只算内容区 ——
+           `.sel { height:824; padding-bottom:84 }` 的元素外框其实是 908，
+           子节点却仍然排在 0~824 里，于是三个胶囊正好贴在屏幕最下沿、下面一点余量都没有。
+           这几版 padB 从 22 加到 48 再到 84 在真机上毫无变化，就是这个原因。
+           现在用一个 84 高的空 div 顶住，列表（flex-grow:1）自己让位。 -->
+      <div class="sel-gap" style="height: {{cardS.padB}}px;"></div>
+      <!-- 只保留"点了锁定地图"这一句功能提示；常驻的操作说明去掉了（底部留白更干净） -->
+      <!-- 提示浮在最下面：绝对定位，不占流 —— 占流的话这一行 22 高会从列表里扣掉，
+           列表少露的那截正好是"下面还有地图"的暗示 -->
+      <text class="sel-foot-lock" if="{{lockMsg}}" style="bottom: {{cardS.lockBottom}}px;">{{lockMsg}}</text>
+    </div>
+
+    <!-- ==================== 游戏场景 ==================== -->
+    <!--
+      所有像素块都直接挂在 .page 下、各自带绝对坐标。
+      早先把精灵包在 .spr 容器里（容器没有宽高），真机上整组不渲染，
+      鱼 / 船 / 钩全部消失，只剩波浪和水底 —— 所以这里一律扁平化。
+    -->
+    <!-- 游戏场景只在"局中 / 结算"出现（关于页不需要它，省一次整屏重建） -->
+    <block if="{{phase === 'playing' || phase === 'over'}}">
+      <!--
+        兜底水体：一个静态纯色块，垫在全屏底图下面。万一某版固件不认 336x480 的
+        大图，天空/水的分界至少还在，鱼和船仍然看得见，游戏不至于变成黑屏。
+        正常情况下它被底图完全盖住，不产生任何视觉效果。
+      -->
+      <div class="wx" style="background-color: {{water}}; height: {{wxH}}px;"></div>
+
+      <!--
+        静态场景（天空 / 远岸 / 月亮 / 水面线 / 浪花 / 水草 / 礁石）在构建期烘成一张
+        336x480 的全屏位图（tools/gen_sprites.mjs）。原来这里是 60 多个装饰 div，
+        切地图时要整批销毁重建，手环上会明显顿住；现在整个场景只有一个 image，
+        换地图只是换一个 src 字符串，节点数不变。
+      -->
+      <image class="spr" src="{{bgSrc}}" style="left: 0px; top: 0px; width: 336px; height: {{bgH}}px;" />
+
+      <!--
+        水底景观（深水带 + 水底）单独一张，贴着屏幕底边。
+        窄长屏（手环 11）上它跟着 vh 往下走，中间那段纯水色由上面的 .wx 抻开 ——
+        所以背景不会被纵向拉伸，像素格还是正方格。
+      -->
+      <image class="spr" src="{{bedSrc}}" style="left: 0px; top: {{bedTop}}px; width: 336px; height: 124px;" />
+
+      <!--
+        精灵全部是构建期烘好的位图（tools/gen_sprites.mjs），一个精灵 = 一个 image 节点。
+        一帧只改 8~10 个 left/top，比之前每帧重建 200 多个像素块快一个量级。
+      -->
+      <image class="spr" src="{{f1src}}" style="left: {{f1x}}px; top: {{f1y}}px; width: {{f1w}}px; height: {{f1h}}px; opacity: {{f1op}};" />
+      <image class="spr" src="{{f2src}}" style="left: {{f2x}}px; top: {{f2y}}px; width: {{f2w}}px; height: {{f2h}}px; opacity: {{f2op}};" />
+      <image class="spr" src="{{f3src}}" style="left: {{f3x}}px; top: {{f3y}}px; width: {{f3w}}px; height: {{f3h}}px; opacity: {{f3op}};" />
+      <!-- 第 4 条只在窄长屏（手环 11）出现：深水区比设计稿高一倍，3 条太稀 -->
+      <image class="spr" if="{{f4on}}" src="{{f4src}}" style="left: {{f4x}}px; top: {{f4y}}px; width: {{f4w}}px; height: {{f4h}}px; opacity: {{f4op}};" />
+
+      <!-- 星标鱼头顶的 ★：金色鱼 + 这颗星，一眼知道"这条要拉力度条" -->
+      <text class="star-tag" if="{{starOn}}" style="left: {{starX}}px; top: {{starY}}px;">★</text>
+
+      <!-- 稀有金鱼（只在出场时挂节点） -->
+      <image class="spr" if="{{rareOn}}" src="{{rSrc}}" style="left: {{rX}}px; top: {{rY}}px; width: {{rW}}px; height: {{rH}}px; opacity: {{rOp}};" />
+
+      <!-- 船 + 渔夫 + 鱼竿（一张位图，整体随船移动；掉头时换成镜像那张，竿跟着转向） -->
+      <image class="spr" src="{{rigSrc}}" style="left: {{rigX}}px; top: {{rigTop}}px; width: {{rigImgW}}px; height: {{rigImgH}}px;" />
+
+      <!-- 钓线 -->
+      <div class="line" style="left: {{lineX}}px; top: {{lineTop}}px; height: {{lineH}}px; opacity: {{lineOp}};"></div>
+
+      <!-- 鱼钩 -->
+      <image class="spr" src="/common/sprites/hook.png" style="left: {{hookLX}}px; top: {{hookY}}px; width: {{hookW}}px; height: {{hookH}}px; opacity: {{hookOp}};" />
+
+      <!-- 加分飘字 -->
+      <text class="gain" if="{{showGain}}" style="left: {{gainX}}px; top: {{gainY}}px; color: {{accent}};">{{gainText}}</text>
+
+      <!-- HUD -->
+      <!-- 剩余时间条 + HUD。两样都贴着屏幕顶：480 上正好（y=0 / y=8），
+           胶囊屏上会被屏顶的半圆吃掉 —— 4px 的条只剩中间一道弧，分数和倒计时
+           各被切掉一个数字。窄屏的 y / 宽度 / 字号全由 hudSizes() 按圆角几何算。 -->
+      <div class="bar-bg" style="left: {{hudS.barX}}px; top: {{hudS.barTop}}px; width: {{hudS.barW}}px; height: {{hudS.barH}}px; border-radius: {{hudS.barR}}px;">
+        <div class="bar-fill" style="width: {{barW}}px; height: {{hudS.barH}}px; border-radius: {{hudS.barR}}px; background-color: {{accent}};"></div>
+      </div>
+      <div class="hud" style="top: {{hudS.top}}px; height: {{hudS.h}}px; padding-left: {{hudS.padX}}px; padding-right: {{hudS.padX}}px;">
+        <text class="hud-score" style="font-size: {{hudS.scoreSize}}px;">{{score}}</text>
+        <text class="hud-combo" if="{{combo > 1}}" style="font-size: {{hudS.comboSize}}px; color: {{accent}};">{{hudS.comboPrefix}}{{comboText}}</text>
+        <text class="hud-time" style="font-size: {{hudS.timeSize}}px;">{{timeLeft}}s</text>
+      </div>
+      <text class="hint" if="{{phase === 'playing'}}" style="top: {{hintTop}}px;">轻点放钩 · 右滑返回</text>
+
+    </block>
+
+    <!-- ==================== 星标鱼 · 拉鱼力度条 ====================
+         只有钓到星标鱼才会出现（reelOn）。普通鱼一钩入护，不打断节奏。
+         参照星露谷那根竖条：左边一列刻度，中间是往上顶的柱子，
+         柱子穿过绿色区间就累计进度，累计够了鱼才拉得上来。
+    -->
+    <div class="reel" if="{{reelOn}}" style="height: {{vh}}px;">
+      <div class="reel-head">
+        <text class="reel-title">★ 星标鱼上钩</text>
+        <text class="reel-sub">按住往上拉 · 松手下滑 · 跟住绿框</text>
+      </div>
+
+      <div class="reel-body">
+        <!-- 左刻度 -->
+        <div class="reel-scale">
+          <div class="reel-tick" for="{{reelTicks}}"></div>
+        </div>
+        <!-- 轨道：绿框 = 鱼的位置，自己会上下游；柱子从底部顶上来 -->
+        <div class="reel-track">
+          <div class="reel-zone" style="top: {{reelZoneTop}}px; height: {{reelZoneH}}px; border-color: {{reelColor}};"></div>
+          <div class="reel-fill" style="top: {{reelTop}}px; height: {{reelFill}}px;">
+            <div class="reel-cap"></div>
+          </div>
+        </div>
+        <!-- 正在被拉的那条星标鱼：纵向跟着绿框走，一眼看出"它在游" -->
+        <image class="reel-fish" src="{{reelSrc}}" style="width: {{reelFishW}}px; height: {{reelFishH}}px; margin-top: {{reelFishTop}}px;" />
+      </div>
+
+      <div class="reel-bar">
+        <div class="reel-bar-fill" style="width: {{reelProg}}px; background-color: {{reelBarColor}};"></div>
+      </div>
+      <text class="reel-tip" style="color: {{reelColor}};">{{reelTip}}</text>
+    </div>
+
+    <!-- ==================== 结算 ====================
+         尺寸/字号全部走 pS（common/pagesize.js 的 panelSizes）：
+         宽屏 272/16 是设计稿原值，手环 11 放大到 300/24（物理 189 宽、正文 15 物理像素）。
+         原来照 480 写死，212 宽的真机上整块只有 172 物理宽、正文 10 物理 ——"结算栏太小"。 -->
+    <div class="mask" if="{{phase === 'over'}}" style="height: {{vh}}px;">
+      <div class="panel" style="width: {{pS.w}}px; padding-top: {{pS.padT}}px; padding-bottom: {{pS.padB}}px; border-color: {{accent}};">
+        <text class="panel-title" style="width: {{pS.barW}}px; font-size: {{pS.titleSize}}px; letter-spacing: {{pS.titleLs}}px; color: {{accent}};">时间到</text>
+        <text class="panel-score" style="width: {{pS.barW}}px; font-size: {{pS.scoreSize}}px; margin-top: {{pS.scoreMt}}px;">{{score}}</text>
+        <text class="panel-line" style="width: {{pS.barW}}px; font-size: {{pS.lineSize}}px; margin-top: {{pS.lineMt}}px;">钓到 {{caught}} 条 · {{mapLabel}}</text>
+        <text class="panel-gain" style="width: {{pS.barW}}px; font-size: {{pS.gainSize}}px; margin-top: {{pS.gainMt}}px;">积分 +{{score}} · 总 {{lvTotal}}</text>
+        <div class="panel-bar" style="width: {{pS.barW}}px; height: {{pS.barH}}px; margin-top: {{pS.barMt}}px;">
+          <div class="panel-fill" style="width: {{lvBarW}}px; height: {{pS.barH}}px; background-color: {{lvColor}};"></div>
+        </div>
+        <text class="panel-lvup" if="{{lvUp}}" style="width: {{pS.barW}}px; font-size: {{pS.lvupSize}}px; margin-top: {{pS.lvupMt}}px; color: {{lvColor}};">升级！LV {{lvLevel}} · {{lvTier}}</text>
+        <text class="panel-unlock" if="{{lvNewMap}}" style="width: {{pS.barW}}px; font-size: {{pS.unlockSize}}px; margin-top: {{pS.unlockMt}}px;">★ 解锁 {{lvNewMap}} ★</text>
+        <text class="panel-best" if="{{isNewBest}}" style="width: {{pS.barW}}px; font-size: {{pS.bestSize}}px; margin-top: {{pS.bestMt}}px;">★ 新纪录 ★</text>
+        <text class="panel-best" else style="width: {{pS.barW}}px; font-size: {{pS.bestSize}}px; margin-top: {{pS.bestMt}}px;">最高 {{bestOfMap}} 分</text>
+        <!-- 星标鱼：只有钓到星标鱼，面板上才长出这一块。
+             普通鱼连按钮都没有 —— "只有星标鱼能放进鱼缸"这条规则写在模板上，
+             而不是靠点进去再报错。 -->
+        <div class="star-box" if="{{pendingStar}}" style="width: {{pS.starW}}px; margin-top: {{pS.starMt}}px; padding-top: {{pS.starPadT}}px; padding-bottom: {{pS.starPadB}}px;">
+          <div class="star-row">
+            <image class="star-img" src="{{pendingSrc}}" style="width: {{pS.starImgW}}px; height: {{pendingH}}px; margin-right: {{pS.starImgMr}}px;" />
+            <text class="star-name" style="width: {{pS.starNameW}}px; font-size: {{pS.starNameSize}}px;">{{pendingLabel}}</text>
+          </div>
+          <div class="star-btn" if="{{!tankGot}}" onclick="putInTank" style="width: {{pS.starBtnW}}px; height: {{pS.starBtnH}}px; margin-top: {{pS.starBtnMt}}px; border-radius: {{pS.starBtnR}}px;">
+            <text class="star-btn-t" style="width: {{pS.starBtnTW}}px; font-size: {{pS.starBtnSize}}px;">放入鱼缸</text>
+          </div>
+          <text class="star-done" else style="width: {{pS.starW}}px; font-size: {{pS.starDoneSize}}px; margin-top: {{pS.starDoneMt}}px;">已入缸 · 鱼缸 {{tankCount}} / {{tankSlots}}</text>
+        </div>
+        <div class="btns" style="margin-top: {{pS.btnMt}}px;">
+          <div class="btn" style="width: {{pS.btnW}}px; height: {{pS.btnH}}px; margin-left: {{pS.btnMx}}px; margin-right: {{pS.btnMx}}px; background-color: {{accent}};" onclick="restart">
+            <text class="btn-t" style="width: {{pS.btnTxtW}}px; font-size: {{pS.btnSize}}px;">再来一局</text>
+          </div>
+          <div class="btn-ghost" style="width: {{pS.btnW}}px; height: {{pS.btnH}}px; margin-left: {{pS.btnMx}}px; margin-right: {{pS.btnMx}}px; border-color: {{accent}};" onclick="backToSelect">
+            <text class="btn-t" style="width: {{pS.btnTxtW}}px; font-size: {{pS.btnSize}}px; color: {{accent}};">换地图</text>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</template>
+
+<script>
+import storage from '@system.storage'
+import router from '@system.router'
+import brightness from '@system.brightness'
+import { levelInfo, LEVEL_KEY } from '../../common/level.js'
+import { STARS, TANK_KEY, starOf, tankId, tankEntry, parseTank } from '../../common/star.js'
+import { SCREEN, DESIGN_H, screenH, probeScreen, onScreen } from '../../common/screen.js'
+import { cardSizes, isNarrow, shortDesc, titleOf, bestOf } from '../../common/cardsize.js'
+import { panelSizes, hudSizes } from '../../common/pagesize.js'
+import { TEST, TEST_SEED_KEY } from '../../common/dev.js'
+
+/* ---------------- 画布常量 ----------------
+ * 横向：恒定按设计稿 336（manifest 的 designWidth 会把 px 等比缩到真实宽度）。
+ * 纵向：PAGE_H / GROUND_Y / HOOK_BOTTOM / BED_TOP 都随真实屏幕变，
+ *       由 applyLayout() 在 onInit 里按 src/common/screen.js 的画布高重算。
+ *       小米手环 10 Pro（336x480）→ 480，数值和设计稿一模一样；
+ *       小米手环 11（212x520）→ 824，多出来的 344 全给深水区。
+ */
+const DESIGN_W = 336
+let PAGE_H = 480                  // 画布高（设计单位），运行时按设备改
+const WATER_TOP = 176             // 水面 y（抬高、压缩空水域 → 视角更近）；水面位置不随屏幕变
+let GROUND_Y = 430                // 水底 y = PAGE_H - GROUND_H
+const GROUND_H = 50               // 水底层厚度（水底景观图的下半部分）
+const BED_H = 124                 // 水底景观图总高 = 深水带 74 + 水底 50
+const BG_H = 356                 // 上半段背景图高 = 设计稿 480 - BED_H(124)，写死：图是按 480 切的
+let BED_TOP = 356                 // 水底景观图上沿 = PAGE_H - BED_H（窄长屏会更低）
+const TICK = 33                // 一帧 33ms ≈ 30fps（位图精灵后每帧只写 7 次属性，够轻）
+const STEP = TICK / 40         // 所有速度都按"每 40ms"调的，换帧率时用它保持手感不变
+const UNIT = 5                 // 船/渔夫/钩的像素格（和鱼同格，整屏像素网格统一）
+const FUNIT = 5                // 鱼同样 5px 一格
+const BEST_KEY = 'band_pixel_fish_'
+
+const BOAT_TOP = WATER_TOP - 34   // 船精灵顶部，船底吃水 6px
+const RIG_DX = 16                 // 渔夫相对船左边缘
+const RIG_DY = -45                // 渔夫相对船顶部
+// 竿尖 = 竿最后一段像素块的中心/底边（朝右时那块在 x 106..111、y -43..-40）
+// 线挂在块的中心线上、从块底边往下走，才看得出"线是接在竿上的"
+const ROD_TIP_DX = 108            // 竿尖 x（船头朝右），= RIG_DX + 92；gen_sprites 会校验
+const ROD_TIP_DX_L = 12           // 同一块左右镜像后的竿尖 x（船头朝左），= RIG_IMG_DX + 2
+const ROD_TIP_DY = RIG_DY + 5     // -40：竿末块底边 y（相对船顶部）
+const HOOK_DX = 18                // 钩左边缘相对竿尖：让钩柄中心正好落在线上
+const HOOK_REST = WATER_TOP + 14  // 收线后钩的静止 y（吊在船底下方）
+let HOOK_BOTTOM = 394             // 钩能放到的最深处 = GROUND_Y - 36
+
+// 钓具位图（tools/gen_sprites.mjs 烘出来的包围盒，相对 (boatX, BOAT_TOP)）
+const RIG_IMG_W = 101
+const RIG_IMG_H = 96
+const RIG_IMG_DX = 10
+const RIG_IMG_DY = -43
+const RIG_IMG_TOP = BOAT_TOP + RIG_IMG_DY // 位图的页面 y（常量，不用每帧算）
+const LINE_TOP = BOAT_TOP + ROD_TIP_DY    // 鱼线起点 = 竿尖
+// 船头朝右 / 朝左两张钓具位图（gen_sprites 用同一份像素块左右镜像烘出来）
+const RIG_SRC_R = '/common/sprites/rig.png'
+const RIG_SRC_L = '/common/sprites/rig-l.png'
+const SWIPE_DX = 56               // 右滑返回：横向位移阈值（px，按 336 宽设计）
+const SWIPE_DY = 44               // 右滑返回：纵向偏移上限，太斜的滑动不算
+
+const FISH_TOP = WATER_TOP + 56   // 鱼群活动带上沿
+const FISH_PAD = 22               // 鱼群活动带下边距
+const FISH_N = 3                  // 屏上同时游几条（渲染槽写死 3 组字段）
+const FISH_N_TALL = 4             // 窄长屏多一条：深水区高了一倍，3 条太稀疏
+
+/* ---------------- 多屏纵向布局 ----------------
+ * 水面固定在 176（船、竿、钩、力度条都围着它画，动它会全乱），
+ * 多出来的高度全部给"水面以下"：鱼群活动带变深、水底景观贴着屏幕底边。
+ * applyLayout() 在 onInit 里调一次，读到真实屏幕尺寸后可能再调一次。
+ */
+function applyLayout() {
+  PAGE_H = screenH()
+  GROUND_Y = PAGE_H - GROUND_H
+  HOOK_BOTTOM = GROUND_Y - 36
+  BED_TOP = PAGE_H - BED_H
+}
+
+/* ---------------- 鱼的出场 / 入场 ----------------
+ * 老写法是"钓一条、当场在同一条泳道上换一条新的"，鱼凭空出现，很生硬。
+ * 现在拆成三段，肉眼看到的是"这条鱼被提走了，过一会儿从边上又游进来一条"：
+ *   1) 被钓到   → hop 帧内跟着钩子往水面提、边提边淡出（同步收线速度 17px/帧）
+ *   2) 空档     → 这条泳道先空着 gap 帧（1.1~2.0 秒），不立刻补位
+ *   3) 游进来   → 贴着屏边起步，8 帧淡入 + 26 帧里从 35% 加速到全速
+ * 注意：这里全程不出屏（left 永远落在 0..336-w），
+ * 一旦让精灵框越过 336，整页又会变成可滚动的（v2.4 的滑动 bug）。
+ */
+const FISH_RISE = 17              // 被提走时每帧上升 = 钩子的收线速度
+const FISH_HOP = 7                // 提走动画共几帧（102px，正好从水底提到水面附近）
+const FISH_GAP = 34               // 空档帧数下限 ≈1.1s
+const FISH_GAP_RND = 26           // 再加 0~26 帧 ≈0.9s
+const FISH_WARM = 26              // 入场加速：26 帧内从 35% 加到全速
+const FISH_FADE = 0.14            // 入场淡入速度（每帧 +0.14 → 约 8 帧到底）
+
+/* ---------------- 星标鱼 & 拉鱼力度条 ----------------
+ * 星标鱼是本图的招牌猎物（每图一条，见 src/common/star.js），
+ * 钓上来的那一瞬间不直接入护，先进 reel 阶段玩力度条：
+ *   按住屏幕 → 柱子往上升，松手 → 往下沉；
+ *   柱顶停进绿色区间就累计，累计够 REEL_NEED 毫秒算拉上来，
+ *   超过 REEL_LIMIT 还没拉上来，鱼挣脱跑掉（这一局不再出现）。
+ * 普通鱼不会触发这套逻辑，一钩一个准。
+ */
+const STAR_FIRST = 210            // 开局约 7 秒后星标鱼才可能出现（帧数）
+const STAR_JITTER = 90            // 再加 0~3 秒随机，免得每局都同一时刻冒出来
+const REEL_H = 246                // 力度条轨道内部高度（像素，和 .reel-track 的内容高对齐）
+const REEL_UP = 4.8               // 按住时每帧上升
+const REEL_DOWN = 5.8             // 松手时每帧下沉
+const REEL_ZONE = 52              // 绿色目标区高度（原来 92：框大得像口井，站住不动就过了）
+const REEL_DRIFT = 0.036          // 绿区每帧的相位增量（≈ 5.7 秒一个来回，鱼在里面上下游）
+const REEL_NEED = 2000            // 在绿区里累计多少毫秒算成功
+const REEL_DRAIN = 0.6            // 柱顶不在绿区时，进度每毫秒倒扣多少（相对累计速度）
+const REEL_LIMIT = 16000          // 整段拉扯的总时限，超时鱼跑掉
+const TANK_SLOTS = STARS.length   // 鱼缸位数 = 地图张数
+
+// 每张地图的静态场景位图（每条 = 一张 336x480 全屏 PNG，构建期烘好）
+// 加地图时只要往 THEMES 里加一项，这里按同样的顺序补一行即可（tools/preview.mjs 也会读它）
+// 每张地图的背景拆成两张位图：
+//   bg-{i}.png  上半段（天空 + 远岸 + 水面线 + 浪花 + 浅水），336 x 356，贴顶
+//   bed-{i}.png 水底景观（深水带 + 水底），336 x 124，贴底
+// 中间那段"纯水色"用 .wx 那个纯色块填 —— 屏越高填得越多，
+// 所以同一份资源在 336x480 和 212x520 上都能铺满，且像素不被拉伸。
+const BG_SRC = [
+  '/common/sprites/bg-0.png',
+  '/common/sprites/bg-1.png',
+  '/common/sprites/bg-2.png',
+  '/common/sprites/bg-3.png',
+  '/common/sprites/bg-4.png',
+  '/common/sprites/bg-5.png',
+  '/common/sprites/bg-6.png'
+]
+const BED_SRC = [
+  '/common/sprites/bed-0.png',
+  '/common/sprites/bed-1.png',
+  '/common/sprites/bed-2.png',
+  '/common/sprites/bed-3.png',
+  '/common/sprites/bed-4.png',
+  '/common/sprites/bed-5.png',
+  '/common/sprites/bed-6.png'
+]
+
+/* ---------------- 像素精灵（. 透明） ----------------
+ * 鱼：  B 身体 / D 背纹与斑点 / R 暖色带（红腹、锦鲤斑） / W 腹部
+ *       F 鳍（尾鳍、背鳍、腹鳍） / E 眼睛
+ * 船：  M 舷缘 / B 船体 / D 深色船底
+ * 渔夫：H 草帽 / S 皮肤 / E 眼 / C 衣服 / P 裤 / K 鞋 / R 鱼竿
+ *
+ * 八种猎物，每张地图都有自己的"招牌生物"，换地图要能一眼看出换了地方：
+ *   fry     小银鱼  —— 细长、叉尾，池塘里最多
+ *   trout   虹鳟    —— 橄榄背、红侧腹、叉尾、黑斑
+ *   bass    鲈鱼    —— 高背厚身、大嘴，压秤
+ *   puffer  河豚    —— 圆球身 + 一圈刺
+ *   koi     锦鲤    —— 白底红斑、大飘尾
+ *   catfish 鲶鱼    —— 长身宽头，尾巴圆
+ *   jelly   水母    —— 伞盖 + 发光核 + 触须
+ *   crab    螃蟹    —— 正面壳 + 两只钳 + 六条腿
+ *   icefish 冰鱼    —— 极细长 + 冰晶背鳍（极光冰海）
+ *   octopus 章鱼    —— 圆头 + 两只大眼 + 六条卷须（紫雾藻林）
+ *   starfish 海星   —— 五角星，趴在熔岩海沟的石头上
+ *   ray     鳐鱼    —— 菱形大翼 + 细长鞭尾（星海之底）
+ */
+const SPR = {
+  fry: [
+    '..........FFF......',
+    'FFF.......FFFF.....',
+    'FFFF...BDDDDDDB....',
+    '..FFFFBBBBBBBBBBB..',
+    '..FFFBBBBBBBBBBEBO.',
+    'FFFF..BBWWWWWWB....',
+    'FFF................',
+  ],
+  trout: [
+    '.........FFF........',
+    '........FFFFF.......',
+    '.......BBBBBBBB.....',
+    'F.....BBBBBBBBBBDB..',
+    'FF...BBBBBBBBBDBBBB.',
+    'FFF.BBBBBBBBBBBBEBBO',
+    '.FF..BBBBBBBBBBBBBB.',
+    'FF....RRRRRRRRRRRR..',
+    'F.....WWWWWWWWWWWW..',
+    '.....FF......FF.....',
+  ],
+  bass: [
+    '.......FFFFF........',
+    '......FFFFFFF.......',
+    '.....BBBBBBBBB......',
+    '....BBBBBBBBBBBB....',
+    'F..BBBBBBBBBBBBBBB..',
+    'FF.BBBBBBBBBBBBBEBBO',
+    'FFF.BBBBBBBBBBBBBBB.',
+    'FF...WWWWWWWWWWWWW..',
+    '......WWWWWWWWWW....',
+    '....FF.......FF.....',
+  ],
+  catfish: [
+    '........F.F.F.F..........',
+    '.......FF.F.F.FF.........',
+    'F...BDDDDDDDDDDDDDDDDB...',
+    'FF.BBBDDDDDDDDDDDDDBBBB..',
+    'FFBBBBBBBBBBBBBBBBBBEBBB.',
+    'FFBBBBBBBBBBBBBBBBBBBBBO.',
+    'FF.BBBWWWWWWWWWWWWWWBBB..',
+    'F...BWWWWWWWWWWWWWWWWB...',
+  ],
+  koi: [
+    'FF........FFFFF.........',
+    'FFF....BBBBBBBBBB.......',
+    'FFFF.BBBBRRRBBBBBBB.....',
+    '.FFFBBBBRRRBBRRBBBEBB...',
+    '.FFFBBBBBRRBBBBBBBBBBO..',
+    'FFFF.BBBBBBBBRRRBBBBB...',
+    'FFF...BBWWWWWWFFFWW.....',
+    'FF......BWWWWWWWW.......',
+  ],
+  puffer: [
+    '...............',
+    '......D.D......',
+    '......BBB..D...',
+    '..D.BBBBBBB....',
+    '.F.BBBBBBEEB...',
+    'FF.BBBBBBEEBB..',
+    'FF.BBBBBBBBBO..',
+    '.FD.BBBBBBBB...',
+    '......BWWW.D...',
+    '......D.D......',
+    '...............',
+  ],
+  jelly: [
+    '....BBBBBBB....',
+    '..BBBBBBBBBBB..',
+    '.BBBBBBBBBBBBB.',
+    'BBBBBBBBBBBBBBB',
+    'BBBBBRRRBBBBBBB',
+    '.BBBBBBBBBBBBB.',
+    '..WWWWWWWWWWW..',
+    '...F..F..F..F..',
+    '...F..F..F..F..',
+    '....F..F..F....',
+    '....F...F..F...',
+    '.....F...F.....',
+  ],
+  crab: [
+    '..F............F..',
+    '.FFF..........FFF.',
+    '.FBF..BEBBEB..FBF.',
+    '.FBF.BBBBBBBB.FBF.',
+    '..F.BBBBBBBBBB.F..',
+    '....BBBBBBBBBB....',
+    '...BBBBBBBBBBBB...',
+    '..F..F..F..F..F...',
+    '..F..F..F..F..F...',
+  ],
+  icefish: [
+    '.........F..F........',
+    'FFF......FF.FF.......',
+    'FFFF....FFFFFFF......',
+    '....BBDDDDDDDDDDEBB..',
+    '....BBBBBRBBBRBBBBBO.',
+    'FFFF.BWWWWWWWWWWWBB..',
+    'FFF..................',
+    '.....................',
+    '.....................',
+  ],
+  octopus: [
+    '......BBBB......',
+    '....BBBBBBBB....',
+    '...BBBBBBBBBB...',
+    '..BBBEEBBEEBBB..',
+    '..BBBEEBBEEBBB..',
+    '...BBBBBBBBBB...',
+    '....DDDDDDDD....',
+    '....FF.FF.FF....',
+    '...FF..F...FF...',
+    '...F....F...F...',
+    '..FF.FF..FF..FF.',
+    '.FF...FF..FF.FF.',
+    '.F.........F....',
+  ],
+  starfish: [
+    '......B......',
+    '.....BBB.....',
+    '.....BBB.....',
+    '.BBBBBBBBBBB.',
+    '..BBBBRBBBB..',
+    '...BBDRBBB...',
+    '....BBDBB....',
+    '....BB.BB....',
+    '..BBB...BBB..',
+    '.BBB.....BBB.',
+    'BBB.......BBB',
+    'BB.........BB',
+  ],
+  ray: [
+    '.......................',
+    '......BBBB.............',
+    '......BBWWWBB..........',
+    '.......BBBBBBBBB.......',
+    '........BBBBDDBEBBB....',
+    'FFFFFFFFBBBDDDBBBBBBO..',
+    'FF......BBBBBBBEBBB....',
+    '.......BBBBBBBBB.......',
+    '......BBWWWBB..........',
+    '......BBBB.............',
+    '.......................',
+  ],
+  boat: [
+    '..MM............MM..',
+    '..MMM..........MMM..',
+    '..MBBBBBBBBBBBBBBM..',
+    '..MBBBBBBBBBBBBBBM..',
+    '..BBBBBBBBBBBBBBBB..',
+    '...BBBBBBBBBBBBBB...',
+    '....DDDDDDDDDDDD....'
+  ],
+  angler: [
+    '..........',
+    '...HHHH...',
+    '.HHHHHHHH.',
+    '...SSSS...',
+    '...SESS...',
+    '..CCCCCC..',
+    '.CCCCCCCC.',
+    '.CCCCCCCC.',
+    '..CCCCCC..',
+    '..PP..PP..',
+    '..PP..PP..',
+    '.KKK..KKK.'
+  ],
+  hook: [
+    '..S...',
+    '..S...',
+    '..S...',
+    '..S...',
+    '..SSS.',
+    '..S.S.',
+    '...SS.'
+  ]
+}
+
+/* 固定调色板：真机渲染已经全部走烘好的位图，运行时并不读它；
+ * 但 tools/preview.mjs 和 tools/gen_sprites.mjs 会按它把精灵画出来，
+ * 所以这份数据是"构建期资源"，删掉预览就画不出船/渔夫/钩。 */
+const PAL = {
+  boat: { M: '#e0a86a', B: '#a9713f', D: '#6b4023', O: '#241408' },
+  angler: { H: '#e8c46a', S: '#f2c9a0', E: '#241408', C: '#d94f3d', P: '#3b4a6b', K: '#2a2018' },
+  hook: { S: '#eef2f4', O: '#0d1416' }
+}
+
+/* 鱼竿/竿尖的颜色：运行时不用（竿已经烘进 rig.png），tools 里的 buildRig 靠它画预览 */
+const ROD_C = '#d0b078'
+const ROD_TIP_C = '#f0dCa8'
+
+// 钓具/鱼钩位图的显示尺寸（= 字符网格加一圈描边 × 像素格）
+const HOOK_IMG_W = (SPR.hook[0].length + 2) * UNIT
+const HOOK_IMG_H = (SPR.hook.length + 2) * UNIT
+
+/* ---------------- 七张地图的主题配置 ---------------- */
+const THEMES = [
+  {
+    needLv: 1,
+    level: '初级',
+    name: '青草池塘',
+    desc: '慢鱼 · 1倍分 · 60秒',
+    stars: '★',
+    mult: 1,
+    time: 60,
+    speed: 1.5,
+    deco: 'pond',
+    sky: '#183322',
+    water: '#2f6b4a',
+    deep: '#1d4a31',
+    ground: '#3b2c1a',
+    accent: '#8fe0a2',
+    border: '#2f6b4a',
+    outline: '#0a1c12',
+    // 鱼池：开局 / 每次上鱼重生都从池里随机抽一条（重复项 = 出现权重）
+    fish: [
+      { shape: 'fry', value: 3, body: '#f0b352', fin: '#a86e1c', belly: '#ffdc9a', red: '#e8894a', eye: '#20140a' },
+      { shape: 'fry', value: 3, body: '#f0b352', fin: '#a86e1c', belly: '#ffdc9a', red: '#e8894a', eye: '#20140a' },
+      { shape: 'trout', value: 6, body: '#9fc46a', fin: '#5c7d31', belly: '#d6ecb0', red: '#e2683a', eye: '#1b2a0d' },
+      { shape: 'bass', value: 8, body: '#c08a4a', fin: '#7c4f22', belly: '#f0d0a0', red: '#b5562a', eye: '#2a1608' },
+    ],
+    rare: { body: '#ffd93b', fin: '#b8860b', belly: '#fff3b0', red: '#ff9a3c', eye: '#3a2a00' }
+  },
+  {
+    needLv: 16,
+    level: '中级',
+    name: '碧波湖',
+    desc: '中速鱼群 · 2倍分 · 60秒',
+    stars: '★★',
+    mult: 2,
+    time: 60,
+    speed: 2.4,
+    deco: 'lake',
+    sky: '#0f2637',
+    water: '#1e5378',
+    deep: '#123c58',
+    ground: '#26323d',
+    accent: '#79d8f5',
+    border: '#1e5378',
+    outline: '#061420',
+    // 鱼池：开局 / 每次上鱼重生都从池里随机抽一条（重复项 = 出现权重）
+    fish: [
+      { shape: 'fry', value: 3, body: '#8fc4e8', fin: '#3d6f92', belly: '#d8eefb', red: '#f0a060', eye: '#0b2233' },
+      { shape: 'puffer', value: 7, body: '#e8c07a', fin: '#a8763c', belly: '#fff6e0', red: '#e06a3c', eye: '#1a1004' },
+      { shape: 'bass', value: 8, body: '#6f97b4', fin: '#3c5f78', belly: '#bcd8e8', red: '#d4664a', eye: '#08202e' },
+      { shape: 'koi', value: 14, body: '#e8e0f8', fin: '#c0b0d8', belly: '#ffffff', red: '#d84a3a', eye: '#1a0720' },
+    ],
+    rare: { body: '#5fe3c8', fin: '#1c7b6a', belly: '#c9fff5', red: '#ffb35c', eye: '#04241e' }
+  },
+  {
+    needLv: 31,
+    level: '高级',
+    name: '幽暗深海',
+    desc: '快鱼 · 3倍分 · 45秒',
+    stars: '★★★',
+    mult: 3,
+    time: 45,
+    speed: 3.4,
+    deco: 'deep',
+    sky: '#120b26',
+    water: '#2a1c4d',
+    deep: '#180f33',
+    ground: '#2a1c3f',
+    accent: '#bb93ff',
+    border: '#2a1c4d',
+    outline: '#0a0518',
+    // 鱼池：开局 / 每次上鱼重生都从池里随机抽一条（重复项 = 出现权重）
+    fish: [
+      { shape: 'jelly', value: 9, body: '#b9a6f0', fin: '#6f54b8', belly: '#ffffff', red: '#ffe066', eye: '#1a1030' },
+      { shape: 'catfish', value: 11, body: '#8a7f9c', fin: '#4c4260', belly: '#cdc4dc', red: '#a85a48', eye: '#100a18' },
+      { shape: 'crab', value: 13, body: '#e0805e', fin: '#8f3f28', belly: '#f6c6a8', red: '#ffcf6a', eye: '#1c0806' },
+    ],
+    rare: { body: '#ffe98a', fin: '#a8862a', belly: '#fff8c8', red: '#ff7a3c', eye: '#3a2a00' }
+  },
+  {
+    needLv: 46,
+    level: '极寒',
+    name: '极光冰海',
+    desc: '冷光鱼群 · 4倍分 · 45秒',
+    stars: '★★★★',
+    mult: 4,
+    time: 45,
+    speed: 4.0,
+    deco: 'ice',
+    sky: '#07162b',
+    water: '#1b5470',
+    deep: '#0e3348',
+    ground: '#b9d2e2',
+    accent: '#8ff0ea',
+    border: '#1b5470',
+    outline: '#03101c',
+    // 鱼池：开局 / 每次上鱼重生都从池里随机抽一条（重复项 = 出现权重）
+    fish: [
+      { shape: 'icefish', value: 15, body: '#bfe9f7', fin: '#6fa8c8', belly: '#ffffff', red: '#8ef0e6', eye: '#08222e' },
+      { shape: 'puffer', value: 12, body: '#d6e8f2', fin: '#8fa8bc', belly: '#ffffff', red: '#7fd8e0', eye: '#0a1e28' },
+      { shape: 'bass', value: 14, body: '#7fa8c8', fin: '#3f6480', belly: '#cfe6f4', red: '#6fd0d8', eye: '#061620' },
+    ],
+    rare: { body: '#e8fbff', fin: '#8fd8e0', belly: '#ffffff', red: '#9fe8ff', eye: '#08222e' }
+  },
+  {
+    needLv: 61,
+    level: '秘林',
+    name: '紫雾藻林',
+    desc: '高倍率 · 5倍分 · 45秒',
+    stars: '★★★★★',
+    mult: 5,
+    time: 45,
+    speed: 4.4,
+    deco: 'algae',
+    sky: '#150c26',
+    water: '#3a1f52',
+    deep: '#24103a',
+    ground: '#2a1a3d',
+    accent: '#d98cff',
+    border: '#3a1f52',
+    outline: '#0c0418',
+    // 鱼池：开局 / 每次上鱼重生都从池里随机抽一条（重复项 = 出现权重）
+    fish: [
+      { shape: 'octopus', value: 18, body: '#b48cf0', fin: '#7a55c0', belly: '#dcc8ff', red: '#ffd166', eye: '#f2f0ff' },
+      { shape: 'jelly', value: 13, body: '#c9a6f8', fin: '#7a54c0', belly: '#ffffff', red: '#ffe066', eye: '#1a1030' },
+      { shape: 'crab', value: 15, body: '#c07a9c', fin: '#7a3450', belly: '#e8bcc8', red: '#ffb35c', eye: '#1c0806' },
+    ],
+    rare: { body: '#ffe9ff', fin: '#b06ad8', belly: '#ffffff', red: '#8ef0d8', eye: '#2a0a3a' }
+  },
+  {
+    needLv: 76,
+    level: '熔岩',
+    name: '熔岩海沟',
+    desc: '滚烫 · 6倍分 · 40秒',
+    stars: '★★★★★',
+    mult: 6,
+    time: 40,
+    speed: 5.0,
+    deco: 'lava',
+    sky: '#2a0a06',
+    water: '#5c1d10',
+    deep: '#38100a',
+    ground: '#3c1208',
+    accent: '#ff8a3c',
+    border: '#5c1d10',
+    outline: '#180402',
+    // 鱼池：开局 / 每次上鱼重生都从池里随机抽一条（重复项 = 出现权重）
+    fish: [
+      { shape: 'starfish', value: 22, body: '#f0825c', fin: '#a8412c', belly: '#ffc0a0', red: '#ffd166', eye: '#2a0a06' },
+      { shape: 'crab', value: 18, body: '#e07050', fin: '#8f2f1c', belly: '#ffb088', red: '#ffcf6a', eye: '#1c0806' },
+      { shape: 'catfish', value: 20, body: '#8a5a52', fin: '#4a2a24', belly: '#d8b0a0', red: '#ff7a3c', eye: '#140404' },
+    ],
+    rare: { body: '#fff0a8', fin: '#d8a030', belly: '#fffbe0', red: '#ff6a2a', eye: '#3a1a00' }
+  },
+  {
+    needLv: 91,
+    level: '星海',
+    name: '星海之底',
+    desc: '终点 · 8倍分 · 40秒',
+    stars: '★★★★★',
+    mult: 8,
+    time: 40,
+    speed: 5.6,
+    deco: 'star',
+    sky: '#050812',
+    water: '#111c38',
+    deep: '#0a1226',
+    ground: '#14182a',
+    accent: '#cfe4ff',
+    border: '#111c38',
+    outline: '#02040c',
+    // 鱼池：开局 / 每次上鱼重生都从池里随机抽一条（重复项 = 出现权重）
+    fish: [
+      { shape: 'ray', value: 28, body: '#8fb8e8', fin: '#4a6f9c', belly: '#e8f2ff', red: '#cfe4ff', eye: '#081420' },
+      { shape: 'catfish', value: 24, body: '#a8b8d8', fin: '#5f7099', belly: '#e4ecff', red: '#8fb0e8', eye: '#0a1224' },
+      { shape: 'jelly', value: 20, body: '#a6c8f0', fin: '#4a76b8', belly: '#ffffff', red: '#cfe4ff', eye: '#0a1a30' },
+    ],
+    rare: { body: '#ffffff', fin: '#a8c8e8', belly: '#eef6ff', red: '#ffe066', eye: '#30405a' }
+  }
+]
+
+/* ---------------- 地图卡片数据（含等级解锁） ----------------
+ * 未解锁的地图不隐藏，只用灰边 + 暗色 + 一把锁"留个念想"：
+ * 玩家看得到下一张图长什么样、差几级，才有继续钓的动力。
+ */
+const LOCK_BORDER = '#343a40'
+const LOCK_DESC = 'rgba(255, 143, 134, 0.92)'
+const LOCK_DIM = 0.55
+
+/* 精灵的渲染坐标一律夹在屏幕内。
+ * 只要有一个绝对定位节点的框越过 0..336 / 0..480，页面就会长出可滚动区域，
+ * 手指一滑整个背景跟着平移（v1 修过一次，加星标鱼之后又冒出来了）。
+ * 这里只夹"画到哪"，逻辑坐标（走哪条泳道、往哪游）一概不动。 */
+function clampX(x, w) {
+  const max = DESIGN_W - w
+  if (max <= 0) return 0
+  return Math.round(x < 0 ? 0 : x > max ? max : x)
+}
+
+function clampY(y, h) {
+  const max = PAGE_H - h
+  if (max <= 0) return 0
+  return Math.round(y < 0 ? 0 : y > max ? max : y)
+}
+
+// 这条鱼现在看得见吗（被提走半透明 / 空档淡出时，头顶的 ★ 也得跟着收起）
+function showStar(f) {
+  return !f.hop && !f.wait && (f.alpha == null || f.alpha > 0.5)
+}
+
+/* 地图卡片的尺寸/文案都搬到 common/cardsize.js 了：
+ * 预览页（tools/preview.mjs）要读同一份数据，放在这儿它拿不到。
+ * 这里只剩"把主题 + 等级拼成模板能直接吃的扁平字段"。 */
+
+function buildMaps(level, bests, narrow) {
+  return THEMES.map(function (t, i) {
+    const locked = level < t.needLv
+    return {
+      level: t.level,
+      name: t.name,
+      title: titleOf(t, narrow),
+      needLv: t.needLv,
+      stars: t.stars,
+      sky: t.sky,
+      water: t.water,
+      deep: t.deep,
+      accent: locked ? 'rgba(255, 255, 255, 0.42)' : t.accent,
+      border: locked ? LOCK_BORDER : t.border,
+      fishBody: t.fish[1].body,
+      fishFin: t.fish[1].fin,
+      locked: locked,
+      opacity: locked ? LOCK_DIM : 1,
+      // 锁定时说清楚差几级；解锁后宽屏给完整描述、窄屏给精简版
+      descLine: locked
+        ? (narrow ? 'Lv' + t.needLv + ' 解锁' : '达到 Lv' + t.needLv + ' 解锁')
+        : (narrow ? shortDesc(t.desc) : t.desc),
+      descColor: locked ? LOCK_DESC : 'rgba(255, 255, 255, 0.7)',
+      bestLine: bestOf((bests && bests[i]) || 0, locked, narrow)
+    }
+  })
+}
+
+/* ---------------- 每张地图的场景装饰（构建期数据，不进运行时渲染） ----------------
+ * 这一整段只是"场景长什么样"的唯一真源：tools/gen_sprites.mjs 会把 buildScene()
+ * 的结果烘成 src/common/sprites/bg-<地图>.png（336x480 全屏）。
+ * 运行时只挂一张背景位图，切地图 = 换 src，不再销毁重建几十个装饰节点。
+ * 改这里之后必须跑一次 `node tools/gen_sprites.mjs`，否则真机背景不会变。
+ */
+
+// 场景里的一块纯色矩形（只是数据，模板按数据渲染成 div）
+function block(x, y, w, h, c) {
+  return { x: Math.round(x), y: Math.round(y), w: w, h: h, c: c }
+}
+
+function buildScene(theme) {
+  const sky = []
+  const water = []
+  const waves = []
+
+  // 水底沙地 + 碎石
+  water.push(block(0, GROUND_Y, DESIGN_W, PAGE_H - GROUND_Y, theme.ground))
+  water.push(block(0, GROUND_Y, DESIGN_W, 4, 'rgba(255,255,255,0.14)'))
+
+  // 水体纵深：下层更暗，做出"越深越黑"的过渡
+  water.push(block(0, GROUND_Y - 64, DESIGN_W, 64, theme.deep))
+  water.push(block(0, GROUND_Y - 74, DESIGN_W, 10, 'rgba(0,0,0,0.14)'))
+
+  // 近景压暗：画面最底部一条深色带，制造景深
+  water.push(block(0, PAGE_H - 10, DESIGN_W, 10, 'rgba(0,0,0,0.30)'))
+
+  // 水面：亮线 + 断续浪花（像素点阵感）
+  water.push(block(0, WATER_TOP, DESIGN_W, 2, theme.accent))
+  for (let x = 0; x < DESIGN_W; x += 24) {
+    waves.push(block(x, WATER_TOP - 4, 8, 4, theme.accent))
+    waves.push(block(x + 12, WATER_TOP - 8, 6, 4, theme.accent))
+  }
+
+  if (theme.deco === 'pond') {
+    // 夜空 + 月亮 + 远岸
+    sky.push(block(278, 52, 12, 6, '#f3eaa6'))
+    sky.push(block(272, 58, 24, 6, '#f3eaa6'))
+    sky.push(block(272, 64, 24, 6, '#f3eaa6'))
+    sky.push(block(278, 70, 12, 6, '#f3eaa6'))
+    sky.push(block(286, 58, 10, 12, theme.sky))
+    sky.push(block(0, 146, DESIGN_W, 30, '#2a5236'))
+    sky.push(block(40, 138, 88, 8, '#2a5236'))
+    sky.push(block(210, 140, 72, 6, '#2a5236'))
+    // 远处树影
+    sky.push(block(12, 122, 10, 18, '#1d3d27'))
+    sky.push(block(26, 112, 8, 28, '#1d3d27'))
+    sky.push(block(74, 118, 9, 22, '#1d3d27'))
+    sky.push(block(132, 126, 8, 14, '#1d3d27'))
+    sky.push(block(188, 120, 10, 20, '#1d3d27'))
+    sky.push(block(232, 128, 8, 12, '#1d3d27'))
+    sky.push(block(300, 122, 10, 18, '#1d3d27'))
+    // 芦苇
+    water.push(block(4, WATER_TOP - 66, 4, 66, '#4f8a5e'))
+    water.push(block(12, WATER_TOP - 46, 4, 46, '#437a52'))
+    water.push(block(22, WATER_TOP - 56, 4, 56, '#4f8a5e'))
+    water.push(block(316, WATER_TOP - 60, 4, 60, '#4f8a5e'))
+    water.push(block(326, WATER_TOP - 42, 4, 42, '#437a52'))
+    // 荷叶 + 荷花
+    water.push(block(46, WATER_TOP + 16, 22, 4, '#5ba06a'))
+    water.push(block(112, WATER_TOP + 30, 16, 4, '#5ba06a'))
+    water.push(block(268, WATER_TOP + 22, 22, 4, '#5ba06a'))
+    water.push(block(120, WATER_TOP + 24, 4, 6, '#ef9fbe'))
+    // 水底石头
+    water.push(block(30, GROUND_Y - 16, 28, 16, '#4a3a24'))
+    water.push(block(180, GROUND_Y - 12, 36, 12, '#463523'))
+    water.push(block(276, GROUND_Y - 20, 32, 20, '#4a3a24'))
+  }
+
+  if (theme.deco === 'lake') {
+    // 月亮 + 星星
+    sky.push(block(274, 48, 12, 6, '#e9f3ff'))
+    sky.push(block(268, 54, 24, 6, '#e9f3ff'))
+    sky.push(block(268, 60, 24, 6, '#e9f3ff'))
+    sky.push(block(274, 66, 12, 6, '#e9f3ff'))
+    sky.push(block(282, 54, 10, 12, theme.sky))
+    sky.push(block(40, 62, 4, 4, '#a9cbe4'))
+    sky.push(block(86, 46, 4, 4, '#a9cbe4'))
+    sky.push(block(140, 70, 4, 4, '#a9cbe4'))
+    sky.push(block(196, 44, 4, 4, '#a9cbe4'))
+    sky.push(block(230, 78, 4, 4, '#a9cbe4'))
+    sky.push(block(0, 148, DESIGN_W, 28, '#123349'))
+    // 水草
+    water.push(block(34, WATER_TOP + 34, 4, 100, '#2b6b57'))
+    water.push(block(44, WATER_TOP + 56, 4, 78, '#24594a'))
+    water.push(block(292, WATER_TOP + 28, 4, 112, '#2b6b57'))
+    water.push(block(302, WATER_TOP + 64, 4, 76, '#24594a'))
+    // 礁石
+    water.push(block(8, GROUND_Y - 24, 40, 24, '#1b3a4d'))
+    water.push(block(220, GROUND_Y - 30, 44, 30, '#1b3a4d'))
+    water.push(block(146, GROUND_Y - 14, 28, 14, '#204556'))
+  }
+
+  if (theme.deco === 'deep') {
+    // 深海：星星 + 发光浮游
+    sky.push(block(36, 58, 4, 4, '#c9b6ff'))
+    sky.push(block(96, 44, 4, 4, '#c9b6ff'))
+    sky.push(block(150, 66, 4, 4, '#c9b6ff'))
+    sky.push(block(206, 48, 4, 4, '#c9b6ff'))
+    sky.push(block(258, 72, 4, 4, '#c9b6ff'))
+    sky.push(block(300, 46, 4, 4, '#c9b6ff'))
+    sky.push(block(0, 146, DESIGN_W, 30, '#171034'))
+    // 巨藻 + 幽光
+    water.push(block(22, WATER_TOP + 14, 5, 126, '#3d2a66'))
+    water.push(block(36, WATER_TOP + 54, 5, 96, '#332357'))
+    water.push(block(302, WATER_TOP + 10, 5, 130, '#3d2a66'))
+    water.push(block(314, WATER_TOP + 52, 5, 92, '#332357'))
+    water.push(block(86, WATER_TOP + 62, 4, 4, '#7be3ff'))
+    water.push(block(168, WATER_TOP + 108, 4, 4, '#7be3ff'))
+    water.push(block(240, WATER_TOP + 80, 4, 4, '#7be3ff'))
+    water.push(block(118, WATER_TOP + 160, 4, 4, '#7be3ff'))
+    // 礁石
+    water.push(block(6, GROUND_Y - 28, 44, 28, '#231536'))
+    water.push(block(200, GROUND_Y - 34, 52, 34, '#231536'))
+    water.push(block(118, GROUND_Y - 16, 32, 16, '#2b1a44'))
+  }
+
+  if (theme.deco === 'ice') {
+    // 极光：三条缎带，每一段都往右下错开并逐段变淡，才不会被看成一排横杠
+    const ribbons = [
+      [4, 18, '70,225,190', 0.34],
+      [36, 30, '90,200,255', 0.26],
+      [68, 44, '150,255,220', 0.16]
+    ]
+    ribbons.forEach(function (rb) {
+      for (let i = 0; i < 7; i++) {
+        const w = 110 - i * 12
+        if (w <= 0) continue
+        sky.push(block(rb[0] + i * 32, rb[1] + i * 3, w, 7, 'rgba(' + rb[2] + ',' + (rb[3] * (1 - i * 0.11)).toFixed(3) + ')'))
+      }
+    })
+    // 星点
+    sky.push(block(44, 78, 4, 4, '#dff4ff'))
+    sky.push(block(118, 66, 4, 4, '#dff4ff'))
+    sky.push(block(208, 84, 4, 4, '#dff4ff'))
+    sky.push(block(288, 62, 4, 4, '#dff4ff'))
+    sky.push(block(160, 96, 3, 3, '#a8d8ee'))
+    // 远海：比天空略亮的一条
+    sky.push(block(0, 150, DESIGN_W, 26, '#2f6f8c'))
+    // 冰山：三段阶梯堆出尖峰，左小右大
+    const bergs = [
+      [8, 158, 40, '#7fa8c0'], [16, 142, 26, '#9fc8dd'], [24, 126, 14, '#c6e4f2'],
+      [74, 162, 30, '#6f9ab4'], [82, 150, 18, '#9fc8dd'],
+      [196, 160, 46, '#7fa8c0'], [206, 144, 30, '#9fc8dd'], [216, 128, 16, '#c6e4f2'],
+      [262, 164, 44, '#6f9ab4'], [272, 152, 26, '#8fb6cc']
+    ]
+    bergs.forEach(function (b) {
+      water.push(block(b[0], b[1], b[2], WATER_TOP - b[1], b[3]))
+    })
+    // 浮冰：贴着水面的亮块，宽窄不一
+    water.push(block(16, WATER_TOP - 6, 58, 6, '#d6ecf6'))
+    water.push(block(30, WATER_TOP - 10, 22, 4, '#eaf7ff'))
+    water.push(block(148, WATER_TOP - 4, 40, 4, '#eaf7ff'))
+    water.push(block(248, WATER_TOP - 8, 56, 8, '#cfe8f4'))
+    // 水下：窄光柱（宽了就像贴了张色卡）
+    water.push(block(62, WATER_TOP + 6, 10, 148, 'rgba(200, 245, 255, 0.07)'))
+    water.push(block(126, WATER_TOP + 6, 7, 120, 'rgba(200, 245, 255, 0.05)'))
+    water.push(block(214, WATER_TOP + 6, 12, 168, 'rgba(200, 245, 255, 0.06)'))
+    // 冰裂
+    water.push(block(96, WATER_TOP + 40, 3, 96, '#2b6a88'))
+    water.push(block(172, WATER_TOP + 70, 3, 74, '#2b6a88'))
+    water.push(block(276, WATER_TOP + 24, 3, 110, '#2b6a88'))
+    // 冰架：亮面 + 阶梯碎冰 + 裂缝
+    water.push(block(0, GROUND_Y - 10, DESIGN_W, 10, '#e6f4fc'))
+    water.push(block(0, GROUND_Y - 2, DESIGN_W, 6, '#c2dcea'))
+    water.push(block(24, GROUND_Y - 22, 26, 12, '#cfe8f4'))
+    water.push(block(30, GROUND_Y - 30, 14, 8, '#e6f4fc'))
+    water.push(block(184, GROUND_Y - 20, 34, 10, '#cfe8f4'))
+    water.push(block(252, GROUND_Y - 26, 22, 16, '#cfe8f4'))
+    water.push(block(258, GROUND_Y - 34, 10, 8, '#e6f4fc'))
+    water.push(block(70, GROUND_Y + 4, 92, 3, '#8fadc0'))
+    water.push(block(196, GROUND_Y + 12, 104, 3, '#8fadc0'))
+  }
+
+  if (theme.deco === 'algae') {
+    // 雾带：横着铺的半透明紫雾，把远景压浅
+    water.push(block(0, WATER_TOP + 30, DESIGN_W, 26, 'rgba(210, 160, 255, 0.08)'))
+    water.push(block(0, WATER_TOP + 120, DESIGN_W, 34, 'rgba(210, 160, 255, 0.06)'))
+    water.push(block(0, WATER_TOP + 190, DESIGN_W, 30, 'rgba(210, 160, 255, 0.05)'))
+    // 月亮：先堆满圆盘，再从右侧啃掉一大块，剩一牙弯月
+    sky.push(block(268, 48, 16, 4, '#e6d0ff'))
+    sky.push(block(262, 52, 28, 4, '#e6d0ff'))
+    sky.push(block(258, 56, 34, 10, '#e6d0ff'))
+    sky.push(block(258, 66, 34, 10, '#e6d0ff'))
+    sky.push(block(262, 76, 28, 4, '#e6d0ff'))
+    sky.push(block(268, 80, 16, 4, '#e6d0ff'))
+    sky.push(block(276, 44, 26, 44, theme.sky))
+    sky.push(block(270, 50, 10, 32, theme.sky))
+    // 星点
+    sky.push(block(52, 66, 4, 4, '#d8bcff'))
+    sky.push(block(122, 48, 3, 3, '#d8bcff'))
+    sky.push(block(190, 72, 3, 3, '#d8bcff'))
+    // 远岸：一条压暗的紫黑带
+    sky.push(block(0, 148, DESIGN_W, 28, '#1d0f33'))
+    // 藻林：高矮粗细都不一样的柱子，顶端收窄，两侧挂叶
+    const kelp = [
+      [8, 10, 6, 156], [24, 16, 5, 104], [40, 12, 7, 176], [62, 20, 4, 88],
+      [84, 14, 6, 142], [108, 22, 5, 96], [130, 12, 6, 168], [176, 18, 6, 120],
+      [198, 12, 7, 158], [224, 20, 4, 100], [244, 12, 6, 172], [270, 16, 5, 128],
+      [292, 12, 7, 150], [318, 18, 4, 94]
+    ]
+    kelp.forEach(function (k, i) {
+      const c = i % 2 ? '#472375' : '#361c5c'
+      const x = k[0]
+      const y = WATER_TOP + k[1]
+      water.push(block(x, y, k[2], k[3], c))
+      // 顶端收窄成尖
+      water.push(block(x + 1, y - 8, k[2] - 2, 8, c))
+      // 两侧叶片
+      water.push(block(x - 7, y + 26, 7, 6, c))
+      water.push(block(x + k[2], y + 54, 7, 6, c))
+      water.push(block(x - 7, y + 86, 7, 6, c))
+      if (k[3] > 150) water.push(block(x + k[2], y + 118, 7, 6, c))
+    })
+    // 孢子微光
+    water.push(block(52, WATER_TOP + 58, 4, 4, '#f0c0ff'))
+    water.push(block(116, WATER_TOP + 126, 4, 4, '#f0c0ff'))
+    water.push(block(168, WATER_TOP + 40, 4, 4, '#f0c0ff'))
+    water.push(block(228, WATER_TOP + 100, 4, 4, '#f0c0ff'))
+    water.push(block(296, WATER_TOP + 150, 4, 4, '#f0c0ff'))
+    // 珊瑚：两丛扇形，把水底撑起来
+    const coral = [26, 250]
+    coral.forEach(function (cx) {
+      // 主干 + 三杈，杈尖再点一小块亮色，远看是丛珊瑚不是天线
+      water.push(block(cx, GROUND_Y - 30, 7, 30, '#5c2f7a'))
+      water.push(block(cx - 14, GROUND_Y - 40, 16, 7, '#7a3f9c'))
+      water.push(block(cx + 5, GROUND_Y - 34, 16, 7, '#7a3f9c'))
+      water.push(block(cx - 20, GROUND_Y - 50, 9, 10, '#8f4cb0'))
+      water.push(block(cx + 19, GROUND_Y - 44, 9, 10, '#8f4cb0'))
+      water.push(block(cx - 4, GROUND_Y - 52, 9, 10, '#8f4cb0'))
+    })
+    // 礁石
+    water.push(block(70, GROUND_Y - 22, 42, 22, '#2f1c48'))
+    water.push(block(150, GROUND_Y - 32, 52, 32, '#271540'))
+    water.push(block(288, GROUND_Y - 20, 42, 20, '#2f1c48'))
+  }
+
+  if (theme.deco === 'lava') {
+    // 海沟口的天光：越靠下越红
+    sky.push(block(0, 132, DESIGN_W, 14, 'rgba(255, 110, 50, 0.14)'))
+    sky.push(block(0, 146, DESIGN_W, 12, 'rgba(255, 110, 50, 0.22)'))
+    sky.push(block(0, 158, DESIGN_W, 18, '#3f1209'))
+    // 火星
+    sky.push(block(34, 92, 4, 4, '#ff9a4a'))
+    sky.push(block(88, 74, 3, 3, '#ff7a3c'))
+    sky.push(block(150, 104, 4, 4, '#ffb060'))
+    sky.push(block(214, 82, 3, 3, '#ff9a4a'))
+    sky.push(block(286, 96, 4, 4, '#ff7a3c'))
+    // 热泉：石烟囱 + 赤热的口 + 上升热柱（分段变淡，像烟不像柱子）
+    const vents = [[36, 30], [140, 22], [232, 34]]
+    vents.forEach(function (v) {
+      const x = v[0]
+      const w = v[1]
+      water.push(block(x, GROUND_Y - 30, w + 8, 30, '#2a0c08'))
+      water.push(block(x + 4, GROUND_Y - 44, w - 6, 14, '#3a120a'))
+      water.push(block(x + 8, GROUND_Y - 48, w - 14, 4, '#ff8a3c'))
+      for (let i = 0; i < 6; i++) {
+        water.push(block(x + 6 + i * 2, GROUND_Y - 56 - i * 20, w - 12, 16, 'rgba(255, 130, 60, ' + (0.16 - i * 0.024).toFixed(3) + ')'))
+      }
+    })
+    // 气泡
+    water.push(block(46, GROUND_Y - 110, 4, 4, '#ffc074'))
+    water.push(block(52, GROUND_Y - 148, 3, 3, '#ffb060'))
+    water.push(block(150, GROUND_Y - 96, 4, 4, '#ffc074'))
+    water.push(block(158, GROUND_Y - 134, 3, 3, '#ffb060'))
+    water.push(block(244, GROUND_Y - 84, 4, 4, '#ffc074'))
+    // 岩壁：左右两堵暗色岩墙，制造"沟"的感觉
+    water.push(block(0, WATER_TOP + 40, 16, GROUND_Y - WATER_TOP - 40, '#230806'))
+    water.push(block(320, WATER_TOP + 20, 16, GROUND_Y - WATER_TOP - 20, '#230806'))
+    water.push(block(0, WATER_TOP + 120, 26, 22, '#2e0c08'))
+    water.push(block(310, WATER_TOP + 90, 26, 26, '#2e0c08'))
+    // 熔岩池：贴着水底的亮带 + 上方的辉光 + 龟裂
+    water.push(block(0, GROUND_Y - 18, DESIGN_W, 18, 'rgba(255, 120, 40, 0.10)'))
+    water.push(block(0, GROUND_Y, DESIGN_W, 8, '#ff7a2a'))
+    water.push(block(0, GROUND_Y + 8, DESIGN_W, 6, '#ffb35c'))
+    water.push(block(96, GROUND_Y + 14, 40, 3, '#ff6a2a'))
+    water.push(block(206, GROUND_Y + 22, 54, 3, '#ff6a2a'))
+    water.push(block(24, GROUND_Y + 26, 30, 3, '#ff6a2a'))
+  }
+
+  if (theme.deco === 'star') {
+    // 星空：疏密不一的星点，越靠上越亮
+    const stars = [
+      [18, 22, 4, '#ffffff'], [52, 44, 3, '#e8f2ff'], [86, 18, 4, '#ffffff'],
+      [112, 58, 3, '#c8d8f0'], [140, 30, 4, '#ffffff'], [164, 70, 3, '#e8f2ff'],
+      [196, 26, 4, '#ffffff'], [222, 52, 3, '#c8d8f0'], [250, 20, 4, '#ffffff'],
+      [276, 64, 3, '#e8f2ff'], [304, 34, 4, '#ffffff'], [322, 74, 3, '#c8d8f0'],
+      [38, 96, 3, '#c8d8f0'], [150, 92, 3, '#e8f2ff'], [268, 98, 3, '#c8d8f0']
+    ]
+    stars.forEach(function (st) {
+      sky.push(block(st[0], st[1], st[2], st[2], st[3]))
+    })
+    // 星云：斜着往下淌的一条，用阶梯块拼
+    for (let i = 0; i < 6; i++) {
+      sky.push(block(30 + i * 46, 74 + i * 4, 90 - i * 8, 9, 'rgba(150, 190, 255, ' + (0.10 - i * 0.012).toFixed(3) + ')'))
+      sky.push(block(60 + i * 44, 86 + i * 4, 70 - i * 8, 7, 'rgba(190, 160, 255, ' + (0.07 - i * 0.009).toFixed(3) + ')'))
+    }
+    // 远海：一条很暗的带
+    sky.push(block(0, 152, DESIGN_W, 24, '#060b18'))
+    // 最亮的那颗星：十字光晕，水下一整条倒影 —— 这是"星海之底"的记忆点
+    sky.push(block(146, 34, 14, 4, '#ffffff'))
+    sky.push(block(141, 39, 24, 4, '#ffffff'))
+    sky.push(block(151, 28, 4, 26, '#ffffff'))
+    sky.push(block(144, 36, 18, 12, 'rgba(220, 238, 255, 0.35)'))
+    // 水面亮边 + 倒映的星光
+    water.push(block(0, WATER_TOP + 2, DESIGN_W, 3, '#a8c8ee'))
+    for (let i = 0; i < 9; i++) {
+      const w = 16 - i
+      if (w <= 0) continue
+      water.push(block(150 - Math.round(w / 2) + (i % 2 ? 3 : -3), WATER_TOP + 12 + i * 22, w, 6, 'rgba(200, 225, 255, ' + (0.30 - i * 0.028).toFixed(3) + ')'))
+    }
+    const mirrored = [[54, 18, '#8fa8cc'], [102, 46, '#7f9cc4'], [166, 26, '#8fa8cc'], [214, 62, '#6f8cb4'], [268, 30, '#8fa8cc'], [308, 74, '#6f8cb4']]
+    mirrored.forEach(function (m) {
+      water.push(block(m[0], WATER_TOP + m[1], 4, 4, m[2]))
+    })
+    // 光柱：细长、偏淡
+    water.push(block(78, WATER_TOP + 6, 12, 160, 'rgba(200, 230, 255, 0.05)'))
+    water.push(block(140, WATER_TOP + 6, 8, 120, 'rgba(200, 230, 255, 0.04)'))
+    water.push(block(228, WATER_TOP + 6, 14, 176, 'rgba(200, 230, 255, 0.045)'))
+    // 海底：暗色礁石 + 幽光
+    water.push(block(0, GROUND_Y - 22, 56, 22, '#0e1324'))
+    water.push(block(12, GROUND_Y - 34, 26, 12, '#101629'))
+    water.push(block(132, GROUND_Y - 32, 58, 32, '#0b101d'))
+    water.push(block(146, GROUND_Y - 44, 28, 12, '#0e1324'))
+    water.push(block(250, GROUND_Y - 20, 54, 20, '#0e1324'))
+    water.push(block(160, GROUND_Y - 10, 4, 4, '#cfe4ff'))
+    water.push(block(66, GROUND_Y - 6, 4, 4, '#9fc0e8'))
+    water.push(block(276, GROUND_Y - 12, 3, 3, '#cfe4ff'))
+  }
+
+  return { sky: sky, water: water, waves: waves }
+}
+
+/* ---------------- 页面 ---------------- */
+export default {
+  private: {
+    // 卡片数据（Lv1 起：只有第一张图能点）
+    maps: buildMaps(1, [0, 0, 0, 0, 0, 0, 0]),
+    bests: [0, 0, 0, 0, 0, 0, 0],
+    lockMsg: '', // 点到未解锁地图时底部飘一句提示，1.8 秒后自动消失
+    bootLeft: 0, // 初始化还要等几个 storage.get 回来（见 bootDone）
+
+    // 阶段
+    phase: 'select',
+    mapIdx: 0,
+    mapLabel: '',
+
+    // 配色（sky 是页面底色，water 只给兜底水体用；正常画面全由 bgSrc 那张图决定）
+    sky: THEMES[0].sky,
+    water: THEMES[0].water,
+    accent: THEMES[0].accent,
+
+    // 场景
+    waterTop: WATER_TOP, // 水面的公开镜像：tools/simulate.mjs 用它算鱼/钩的坐标（别删）
+    bgSrc: BG_SRC[0],
+    bedSrc: BED_SRC[0],
+
+    /* ---- 多屏布局字段（setViewport 里统一算，模板只读） ----
+     * vh      画布高：336x480 屏是 480，212x520 胶囊屏是 824
+     * bgH     上半段背景图高（固定 356，= 设计稿的 BED_TOP）
+     * bedTop  水底景观图的上沿 = vh - 124（贴底）
+     * wxH     中间那段纯水色的高度 = vh - 176
+     * hintTop 底部那行操作提示的 y = vh - 72
+     * hudS    顶部这一条（时间条 + 分数/连击/倒计时）的 y、宽、字号，见 common/pagesize.js
+     */
+    vh: DESIGN_H,
+    bgH: 356,
+    bedTop: 356,
+    wxH: 304,
+    hintTop: 408,
+    hudS: hudSizes(false),
+    headTop: 8,
+    selPadB: 0,
+    cardsH: 305,
+    // 地图选择页的尺寸组（页头 / 列表预留 / 卡片 / 底部胶囊全在里面，见 common/cardsize.js）
+    cardS: cardSizes(false),
+    // 结算面板的尺寸组（见 common/pagesize.js 的 panelSizes）
+    pS: panelSizes(false),
+    lvPct: 0,
+    narrow: false,
+
+    // 船 / 钩（页面绝对坐标，全部是整数，避免每帧小数抖动）
+    boatX: 120,
+    faceDir: 1,
+    rigSrc: RIG_SRC_R,
+    rigX: 120 + RIG_IMG_DX,
+    rigTop: RIG_IMG_TOP,
+    rigImgW: RIG_IMG_W,
+    rigImgH: RIG_IMG_H,
+    hookX: 190,
+    hookLX: 170,
+    hookY: HOOK_REST,
+    hookW: HOOK_IMG_W,
+    hookH: HOOK_IMG_H,
+    hookOp: 1,
+    lineX: 189,
+    lineTop: LINE_TOP,
+    lineH: 40,
+    lineOp: 1,
+    flipHide: 0,
+
+    // 侧滑返回的触摸起点 / 本次手势是否已判定为滑动
+    tx0: -1,
+    ty0: 0,
+    swiped: false,
+
+    // 鱼（每帧只更新下面这些坐标/图源，不重建数组）
+    f1src: '',
+    f1x: 0,
+    f1y: 0,
+    f1w: 1,
+    f1h: 1,
+    f1op: 1,
+    f2src: '',
+    f2x: 0,
+    f2y: 0,
+    f2w: 1,
+    f2h: 1,
+    f2op: 1,
+    f3src: '',
+    f3x: 0,
+    f3y: 0,
+    f3w: 1,
+    f3h: 1,
+    f4on: false,
+    f4src: '',
+    f4x: 0,
+    f4y: 0,
+    f4w: 1,
+    f4h: 1,
+    f4op: 1,
+    f3op: 1,
+
+    // 星标鱼的 ★ 标记（跟着金色鱼游）
+    starOn: false,
+    starX: 0,
+    starY: 0,
+
+    // 稀有金鱼
+    rareOn: false,
+    rSrc: '',
+    rX: 0,
+    rY: 0,
+    rW: 1,
+    rH: 1,
+    rOp: 1,
+
+    // 数值
+    score: 0,
+    combo: 0,
+    comboText: '1.0',
+    caught: 0,
+    timeLeft: 60,
+    timeTotal: 60,
+    barW: DESIGN_W,
+    gainText: '',
+    gainX: 0,
+    gainY: 0,
+    showGain: false,
+    isNewBest: false,
+    bestOfMap: 0,
+
+    // 等级（积分 = 历史累计得分，见 src/common/level.js）
+    lvLevel: 1,
+    lvTier: '木牌',
+    lvColor: '#d9a05e',
+    lvTotal: 0,
+    lvBarW: 0,
+    lvUp: false,
+    lvNewMap: '', // 本局刚解锁的地图名（结算面板上提示一次）
+
+    /* ---------------- 星标鱼 / 拉鱼力度条 ----------------
+     * 模板只能读扁平字段，力度条的每一帧都往下面这几个数字上写：
+     *   reelFill / reelTop  柱子高度与柱顶位置（相对轨道内部）
+     *   reelZoneTop/ZoneH   绿色目标区（每局随机高度 + 每帧上下漂移，背位置没用）
+     *   reelFishTop         鱼的纵向位置（跟着绿框走，鱼就是目标）
+     *   reelProg            绿区内累计进度条的宽度
+     *   reelBarColor        进度条颜色：绿=在涨，橙红=正在掉
+     */
+    reelOn: false,
+    reelColor: '#f7c948',
+    reelBarColor: '#7ee08a',
+    reelFill: 0,
+    reelTop: REEL_H,
+    reelZoneTop: 40,
+    reelZoneH: REEL_ZONE,
+    reelFishTop: 40,
+    reelProg: 0,
+    reelTip: '',
+    reelSrc: '',
+    reelFishW: 64,
+    reelFishH: 32,
+    reelTicks: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+
+    // 本局钓到、还没放进展柜的星标鱼（结算面板上的那一块）
+    pendingStar: '',
+    pendingName: '',
+    pendingLabel: '',
+    pendingSrc: '',
+    pendingW: 76,
+    pendingH: 38,
+    tankGot: false,
+    tankCount: 0,
+    tankSlots: TANK_SLOTS
+  },
+
+  onInit() {
+    const self = this
+
+    // 视口：先按设计稿（480）排，拿到真机尺寸后立刻重排一次。
+    // device.getInfo 文档只给回调形式，屏幕.js 里先试同步、同步拿不到才有这一次回调。
+    this.setViewport()
+    this.offScreen = onScreen(function () {
+      self.setViewport()
+      self.relayoutFish()
+    })
+    probeScreen()
+
+    // 初始化要读 7 张图的最高分 + 总积分 + 鱼缸，共 THEMES.length + 2 个 key。
+    // 测试数据的灌注必须等这些**全部**回来之后再做（见 bootDone）：
+    // storage.get 是异步的，如果在最前面就写 334000，紧接着发起的 get 读到的还是旧值 0，
+    // 回调一执行就把刚灌好的 123 级冲成 LV1 —— 表现就是"等级是 123，地图却全锁着"。
+    this.bootLeft = THEMES.length + 2
+
+    // 每张地图的最高分（张数跟着 THEMES 走，加地图不用改这里）
+    THEMES.forEach(function (t, i) {
+      self.readInit(BEST_KEY + i, '0', function (data) {
+        const v = parseInt(data, 10) || 0
+        const arr = self.bests.slice()
+        arr[i] = v
+        self.bests = arr
+        self.refreshMaps() // 最高分要显示在对应卡片上
+      })
+    })
+
+    // 累计积分 → 等级（读不到就是新玩家：0 分，LV1 木牌）
+    this.total = 0
+    this.readInit(LEVEL_KEY, '0', function (data) {
+      self.total = parseInt(data, 10) || 0
+      self.applyLevel()
+    })
+
+    // 鱼缸：只为了在选择页/结算面板上显示"已收集 n / 7"
+    this.tankCount = 0
+    this.readInit(TANK_KEY, '', function (data) {
+      const list = parseTank(data)
+      self.tankCount = list.length
+      // 测试包专用：缸里若还有"没记时间"的老记录（v2.6 之前写的两段格式 m:shape），
+      // 按当前时间整缸重写一遍 —— 否则鱼缸页点开永远显示"钓到时间未记录"，
+      // 这个功能到底修没修好根本验不出来。正式版（TEST.on = false）走不到这里。
+      if (TEST.on && TEST.fillTank) {
+        let stale = false
+        for (let i = 0; i < list.length; i++) {
+          if (!list[i].ts) stale = true
+        }
+        if (stale) self.fillTankNow()
+      }
+    })
+
+    // 运行时状态（不参与渲染，避免每帧 diff 大对象）
+    this.g = { fish: [], rare: null, star: null }
+    this.acc = 0
+    this.boatDir = 1
+    this.rareTimer = 0
+    this.starTimer = 0
+    this.gainTick = 0
+    this.hookState = 'idle'
+    this.backAt = 0 // 上次回到地图选择页的时刻（吃掉同一次手势的第二遍）
+    this.quitAt = 0 // 上次调退出接口的时刻（防同一次手势重复退出）
+    this.keepOn = false // 屏幕常亮开关的当前状态（用来去重，别每帧调系统接口）
+  },
+
+  /* ---------------- 初始化读取 ---------------- */
+  // 读一个初始化 key：成功就把值交给 apply，失败也照样销账
+  // （fail 也要销账，否则某一个 key 读失败，bootLeft 永不归零，测试包就永远不灌）
+  readInit(key, def, apply) {
+    const self = this
+    storage.get({
+      key: key,
+      default: def,
+      success: function (data) {
+        if (apply) apply(data)
+        self.bootDone()
+      },
+      fail: function () {
+        self.bootDone()
+      }
+    })
+  },
+
+  // 初始化读取全部回来 → 这时内存里已经是"存储里的真值"，
+  // 再灌测试数据就不会被后续的旧值回调覆盖。
+  bootDone() {
+    if (this.bootLeft <= 0) return // 多回来一次也不重复灌
+    this.bootLeft--
+    if (this.bootLeft > 0) return
+    if (TEST.on) this.seedTest()
+    else this.purgeTestData()
+  },
+
+  /* ---------------- 正式版：清掉测试包留下的假存档 ----------------
+   * 测试包会往设备里写 123 级 / 满缸 / 一串假最高分，并留下 TEST_SEED_KEY 标记。
+   * 把开关切成 false 并不会把已经写进去的东西变回来 —— 玩家装正式版后
+   * 还是 123 级、缸里七条鱼都显示"已入缸"，跟没换包一样。
+   * 所以正式版首次启动清一次，然后**必须删掉标记**，否则每次启动都会把
+   * 玩家新钓的分、新入缸的鱼拍回 0（那就成每日清档了）。
+   */
+  purgeTestData() {
+    const self = this
+    storage.get({
+      key: TEST_SEED_KEY,
+      default: '',
+      success: function (data) {
+        if (data !== '1') return
+        storage.set({ key: LEVEL_KEY, value: '0' })
+        for (let i = 0; i < THEMES.length; i++) {
+          storage.set({ key: BEST_KEY + i, value: '0' })
+        }
+        storage.set({ key: TANK_KEY, value: '' })
+        storage.set({ key: TEST_SEED_KEY, value: '' })
+
+        // 内存也跟着归零，别让界面还挂着 123 级、七图全开
+        self.total = 0
+        const zero = []
+        for (let i = 0; i < THEMES.length; i++) zero.push(0)
+        self.bests = zero
+        self.tankCount = 0
+        self.applyLevel()
+      },
+      fail: function () {}
+    })
+  },
+
+  /* ---------------- 测试数据（只有 TEST.on 时才走） ----------------
+   * 灌一次就够：用 TEST_SEED_KEY 做标记，免得每次启动都把测试中钓到的分/缸里的鱼拍回原样。
+   * 想反复验同一屏就把 dev.js 的 resetOnStart 改成 true。
+   */
+  seedTest() {
+    if (TEST.resetOnStart) {
+      this.writeTestData()
+      return
+    }
+    const self = this
+    storage.get({
+      key: TEST_SEED_KEY,
+      default: '',
+      success: function (data) {
+        if (data) return
+        self.writeTestData()
+      },
+      fail: function () {
+        self.writeTestData()
+      }
+    })
+  },
+
+  writeTestData() {
+    // 每张图的最高分先写：applyLevel() 里会 refreshMaps()，那时要能读到新值
+    if (TEST.seedBest) {
+      const arr = this.bests.slice()
+      for (let i = 0; i < THEMES.length; i++) {
+        arr[i] = 220 + i * 130
+        storage.set({ key: BEST_KEY + i, value: String(arr[i]) })
+      }
+      this.bests = arr
+    }
+
+    // 等级：写累计积分，其余照常走 applyLevel()
+    this.total = TEST.total
+    storage.set({ key: LEVEL_KEY, value: String(TEST.total) })
+    this.applyLevel()
+
+    // 鱼缸：7 条星标鱼全预置（'m:shape:ts' 换行数组，和 putInTank 同一套格式）。
+    if (TEST.fillTank) this.fillTankNow()
+
+    storage.set({ key: TEST_SEED_KEY, value: '1' })
+  },
+
+  /* 把鱼缸整缸重写成"七条都已收集、各带一个时间"。
+   * 时间故意做成阶梯（每条比前一条早两天），这样鱼缸页点开详情能看出差别，
+   * 不会七条一模一样、看不出时间到底读没读对。
+   * 正式入缸走 putInTank()，这里只在测试包里用。 */
+  fillTankNow() {
+    const now = Date.now()
+    const ids = STARS.map(function (s, i) {
+      return tankEntry(s.m, now - (STARS.length - i) * 2 * 86400000)
+    })
+    storage.set({ key: TANK_KEY, value: ids.join('\n') })
+    this.tankCount = ids.length
+  },
+
+  /* ---------------- 鱼缸存储 ----------------
+   * 格式 'm:shape:ts'（换行分隔），解析统一走 common/star.js 的 parseTank：
+   * 主页面和鱼缸页必须是同一套解析，否则一边认两段、一边认三段，鱼就会"有时在有时不在"。
+   */
+  saveTank(list) {
+    this.tankCount = list.length
+    const rows = list.map(function (e) {
+      return e.id + ':' + (e.ts || 0)
+    })
+    try {
+      storage.set({ key: TANK_KEY, value: rows.join('\n') })
+    } catch (e) {}
+  },
+
+  // 只有星标鱼能进这里：普通鱼连 id 都拿不到。
+  // 入缸的同时把"钓到的时间"一起写进去 —— 鱼缸页点开详情看的就是这个时刻。
+  putInTank() {
+    if (!this.pendingStar || this.tankGot) return
+    const self = this
+    const entry = { id: this.pendingStar, m: parseInt(this.pendingStar, 10) || 0, ts: Date.now() }
+
+    storage.get({
+      key: TANK_KEY,
+      default: '',
+      success: function (data) {
+        const list = parseTank(data)
+        for (let i = 0; i < list.length; i++) {
+          if (list[i].id === entry.id) {
+            // 缸里早就有这条、但它是 v2.6 之前写的老格式（没有时间戳）：
+            // 这次又拿到了，就把时间补上 —— 鱼缸页才有东西可显示。
+            if (!list[i].ts) {
+              list[i].ts = entry.ts
+              self.saveTank(list)
+            }
+            self.tankGot = true // 早就收过同一条：不重复占格，但按钮也不用再点了
+            self.tankCount = list.length
+            return
+          }
+        }
+        list.push(entry)
+        self.saveTank(list)
+        self.tankGot = true
+      },
+      fail: function () {
+        self.saveTank([entry])
+        self.tankGot = true
+      }
+    })
+  },
+
+  openTank() {
+    try {
+      router.push({ uri: '/tank' })
+    } catch (e) {
+      console.log('router.push failed', e)
+    }
+  },
+
+  onShow() {
+    // 从关于页 router.back() 回来也会走到这里。
+    // 1) 只有在局中才需要主循环（选择页跑空循环纯费电）
+    // 2) 清掉手势起点、并把 backAt 记成当前时刻：避免"从关于页滑回来的那一下"
+    //    紧接着又在选择页上被算成"再返回一次"、把应用直接退掉
+    this.tx0 = -1
+    this.backAt = Date.now()
+    if (this.phase === 'playing') {
+      this.setKeepOn(true) // 后台回来接着钓，常亮要重新要一次
+      this.startLoop()
+    }
+  },
+
+  onHide() {
+    this.stopLoop()
+    this.setKeepOn(false) // 切到后台/抬手看别的，别替系统省电策略做主
+  },
+
+  onDestroy() {
+    this.stopLoop()
+    this.setKeepOn(false)
+    if (this.offScreen) this.offScreen()
+  },
+
+  /* ---------------- 多屏布局 ----------------
+   * 画布高（this.vh）是唯一变量：横向恒定 336，纵向按设备走。
+   * 模板里凡是"贴底"的东西都读这里算出来的字段，所以换屏不用改模板。
+   */
+  setViewport() {
+    applyLayout() // 先按画布高重算 GROUND_Y / HOOK_BOTTOM / BED_TOP
+    const vh = screenH()
+    this.vh = vh
+    this.bgH = BG_H // 上半段背景图高固定 356：图是按设计稿切的，不能跟着屏幕拉长
+    this.bedTop = BED_TOP
+    this.wxH = vh - WATER_TOP
+    this.hintTop = vh - 72
+    // 胶囊屏：HUD 往下挪一点、左右多缩一点，躲开上下圆角
+    this.headTop = 8 + SCREEN.padTop
+
+    /* 窄屏判定：看真实宽度，不看画布高。
+     * 手环 11 是 212 宽，设计稿被缩到 0.631 倍 —— 换算口诀：物理像素 = 设计单位 × 0.631。
+     * 手环系统菜单的字大约 28~32 物理像素，所以卡名得写 40（≈25 物理）才看得清，
+     * 代价是一屏只露 3.3 张。整套数值见 common/cardsize.js。
+     * 宽屏（Pro 336）走原设计稿，不受影响；拿不到尺寸时 realW 还是 336，同样安全。 */
+    this.narrow = isNarrow(SCREEN.realW)
+    this.cardS = cardSizes(this.narrow)
+    /* 顶部这条同理：窄屏把时间条和 HUD 从"贴顶"搬到屏顶半圆之下，
+     * 宽度按那个高度的可用宽度收 —— 不然时间条只剩中间一道弧（hudSizes 里有算式）。 */
+    this.hudS = hudSizes(this.narrow)
+    this.barW = Math.round(this.hudS.barW * (this.timeLeft / this.timeTotal))
+    this.selPadB = this.cardS.padB // 底部留白也由 cardSizes 给（窄屏要躲圆角）
+
+    /* 结算面板同理：480 上 272 宽 / 正文 16 是设计稿原值，
+     * 手环 11 上放大到 300 宽 / 正文 24（物理 189 宽、15 物理像素）。
+     * 进度条宽度绑在面板上，面板一变就得跟着重算（原来写死 240）。 */
+    this.pS = panelSizes(this.narrow)
+    this.lvBarW = Math.round(this.pS.barW * (this.lvPct || 0) / 100)
+
+    // 列表高度写死算出来，不靠 flex-grow。
+    // 480 - 160 - 15 = 305 → 一屏 3.05 张；824 - 294 - 84 = 446 → 一屏 2.4 张（第 3 张露一角）。
+    const ch = vh - this.cardS.reserve - this.selPadB
+    this.cardsH = ch > 200 ? ch : 200
+
+    // 卡片的文案也跟着宽/窄屏换（窄屏去掉了"初级 · "前缀和氛围描述），要重建一次
+    if (this.maps) this.refreshMaps()
+  },
+
+  // 尺寸回得比第一帧晚时，把已经在游的鱼从旧活动带里捞回来（别留在水底以下）
+  relayoutFish() {
+    const list = this.g && this.g.fish
+    if (!list) return
+    for (let i = 0; i < list.length; i++) {
+      const f = list[i]
+      const bottom = GROUND_Y - f.h - FISH_PAD
+      if (f.y > bottom) f.y = bottom > FISH_TOP ? bottom : FISH_TOP
+    }
+    this.syncFish()
+  },
+
+  /* ---------------- 屏幕常亮 ----------------
+   * 手环默认十几秒无操作就息屏，钓鱼要一直盯着，进游戏必须强制常亮。
+   * brightness.setKeepScreenOn 是系统官方接口（manifest 里声明 system.brightness），
+   * 传 false 就把控制权还给系统；这里用 keepOn 去重，避免重复调系统接口。
+   */
+  setKeepOn(on) {
+    if (this.keepOn === on) return
+    this.keepOn = on
+    try {
+      brightness.setKeepScreenOn({ keepScreenOn: on })
+    } catch (e) {
+      // 极老固件没有这个接口：退化成"不常亮"，不影响游戏
+    }
+  },
+
+  startLoop() {
+    this.stopLoop()
+    const self = this
+    this.loop = setInterval(function () {
+      self.tick()
+    }, TICK)
+  },
+
+  stopLoop() {
+    if (this.loop) {
+      clearInterval(this.loop)
+      this.loop = 0
+    }
+  },
+
+  /* ---------------- 开局 ---------------- */
+  selectMap(idx) {
+    const theme = THEMES[idx]
+    if (!theme) return
+    // 等级不够：不进游戏，只在底部说一句"还差几级"
+    const need = theme.needLv || 1
+    const lv = levelInfo(this.total || 0).level
+    if (lv < need) {
+      this.showLock(need, lv)
+      return
+    }
+    this.lockMsg = ''
+    if (this.lockTimer) {
+      clearTimeout(this.lockTimer)
+      this.lockTimer = 0
+    }
+    this.mapIdx = idx
+    this.startGame()
+  },
+
+  showLock(need, lv) {
+    const self = this
+    this.lockMsg = '还差 ' + (need - lv) + ' 级 · Lv' + need + ' 解锁'
+    if (this.lockTimer) clearTimeout(this.lockTimer)
+    this.lockTimer = setTimeout(function () {
+      self.lockMsg = ''
+      self.lockTimer = 0
+    }, 1800)
+  },
+
+  // 等级变化后重算全部卡片的锁定态（未解锁的显示"达到 LvX 解锁"）
+  refreshMaps() {
+    this.maps = buildMaps(levelInfo(this.total || 0).level, this.bests, this.narrow)
+  },
+
+  /* ---------------- 等级 ---------------- */
+  // 把 levelInfo() 的结果摊到页面字段上（模板只能读扁平字段）
+  applyLevel() {
+    const info = levelInfo(this.total || 0)
+    this.lvLevel = info.level
+    this.lvTier = info.tierName
+    this.lvColor = info.color
+    this.lvTotal = info.total
+    /* 结算面板的进度条：宽度绑面板宽度（宽屏 240 / 窄屏 264），不再写死 240 —— 写死的话
+     * 窄屏面板一放宽，进度条就只走一半，看着像"进度只有 50%"。 */
+    this.lvPct = info.percent
+    this.lvBarW = Math.round(this.pS.barW * (info.percent / 100))
+    this.refreshMaps() // 等级变了 → 地图解锁状态跟着变
+  },
+
+  openLevel() {
+    try {
+      router.push({ uri: '/level' })
+    } catch (e) {
+      console.log('router.push failed', e)
+    }
+  },
+
+  /* ---------------- 关于页（独立页面，不是弹窗） ---------------- */
+  openAbout() {
+    // 关于页是 manifest 里注册的第二个页面：push 进去，回来时系统会走 back
+    try {
+      router.push({ uri: '/about' })
+    } catch (e) {
+      // 极老的固件没有 router.push 时退化成什么都不做，至少不会崩
+      console.log('router.push failed', e)
+    }
+  },
+
+  startGame() {
+    const theme = THEMES[this.mapIdx]
+
+    this.lvNewMap = '' // 上一局的"解锁提示"不要带到这一局
+    this.lockMsg = ''
+    /* 结算面板上那行「钓到 N 条 · <地图>」：窄屏只留地名。
+     * 「初级 · 青草池塘」14 个字在 24 号字下要 336，面板内宽只有 264 —— 必然挤出面板。 */
+    this.mapLabel = this.narrow ? theme.name : theme.level + ' · ' + theme.name
+    this.sky = theme.sky
+    this.water = theme.water
+    this.accent = theme.accent
+    this.bgSrc = BG_SRC[this.mapIdx]
+    this.bedSrc = BED_SRC[this.mapIdx]
+
+    this.score = 0
+    this.combo = 0
+    this.comboText = '1.0'
+    this.caught = 0
+    this.timeLeft = theme.time
+    this.timeTotal = theme.time
+    this.barW = this.hudS.barW
+    this.isNewBest = false
+    this.lvUp = false
+    this.bestOfMap = this.bests[this.mapIdx] || 0
+    this.showGain = false
+    this.acc = 0
+
+    // 鱼群：位置/速度在 JS 里算，画面只认一个位图 + 一个坐标
+    // 每条都从本图鱼池里随机抽种类（池里重复项 = 权重），所以三图各有各的鱼群长相
+    const fish = []
+    const fishN = SCREEN.tall ? FISH_N_TALL : FISH_N
+    this.f4on = fishN > 3
+    for (let i = 0; i < fishN; i++) {
+      const f = this.rollFish()
+      f.x = Math.round(Math.random() * (DESIGN_W - f.w))
+      f.y = 0
+      f.dir = Math.random() < 0.5 ? 1 : -1
+      f.speed = theme.speed * (0.75 + i * 0.28)
+      fish.push(f)
+    }
+    this.g.fish = fish
+    for (let i = 0; i < fish.length; i++) {
+      fish[i].y = this.randFishY(fish[i].h, fish[i])
+    }
+
+    // 稀有金鱼（fry 造型 + 金色配色 → 单独烘一份图）
+    this.g.rare = {
+      x: -80,
+      y: 0,
+      dir: 1,
+      srcR: '/common/sprites/fish-' + this.mapIdx + '-r.png',
+      srcL: '/common/sprites/fish-' + this.mapIdx + '-r-l.png'
+    }
+    this.rareTimer = 250 // ≈10 秒后可能出现金鱼
+    this.rareOn = false
+
+    // 星标鱼：正式版每局只安排一次，7 秒后开始倒计时；钓到 / 超时本局就没了。
+    // 测试包里把等待压到 0.5 秒，见 src/common/dev.js
+    this.g.star = null
+    this.starTimer = TEST.on
+      ? TEST.starFirst + Math.floor(Math.random() * TEST.starJitter)
+      : STAR_FIRST + Math.floor(Math.random() * STAR_JITTER)
+    this.starUsed = false
+    this.reelOn = false
+    this.reelHold = 0
+    this.reelAge = 0
+    this.hold = false
+    this.pendingStar = ''
+    this.pendingName = ''
+    this.pendingLabel = ''
+    this.pendingSrc = ''
+    this.tankGot = false
+
+    // 船 / 钩
+    this.boatX = 120
+    this.boatDir = 1
+    this.faceDir = 1
+    this.rigSrc = RIG_SRC_R
+    this.hookOp = 1
+    this.lineOp = 1
+    this.flipHide = 0
+    this.hookY = HOOK_REST
+    this.hookState = 'idle'
+    this.phase = 'playing'
+    this.layoutFish()
+    this.syncRig()
+    this.syncHook(true)
+
+    // 进游戏就强制亮屏（手环默认十几秒息屏，钓鱼根本没法玩）
+    this.setKeepOn(true)
+
+    // 必须在这里重启主循环：backToSelect() 会 stopLoop()，而页面 onShow 只在
+    // 首次进入时触发一次 —— 少了这行，返回选择页再选地图就只剩静止画面（看起来像卡死）。
+    this.startLoop()
+  },
+
+  /**
+   * 从当前地图的鱼池里随机抽一条鱼。
+   * 池里允许重复项（想让哪种多，就多放一条当权重）；尺寸和图源都按 SPR 现算，
+   * 所以以后加鱼种只要改 SPR + THEMES[].fish，渲染层一行都不用动。
+   */
+  rollFish() {
+    const theme = THEMES[this.mapIdx]
+    const cfg = theme.fish[Math.floor(Math.random() * theme.fish.length)]
+    const rows = SPR[cfg.shape]
+    const short = cfg.shape
+    return {
+      shape: short,
+      w: (rows[0].length + 2) * FUNIT,
+      h: (rows.length + 2) * FUNIT,
+      value: cfg.value,
+      srcR: '/common/sprites/fish-' + this.mapIdx + '-' + short + '.png',
+      srcL: '/common/sprites/fish-' + this.mapIdx + '-' + short + '-l.png',
+      // 动画状态（见 FISH_* 常量）：hop=被提走的剩余帧、wait=空档剩余帧、
+      // alpha=透明度（入场淡入用）、warm=入场加速计数
+      hop: 0,
+      wait: 0,
+      alpha: 1,
+      warm: FISH_WARM
+    }
+  },
+
+  restart() {
+    this.startGame()
+  },
+
+  backToSelect() {
+    this.stopLoop()
+    this.setKeepOn(false) // 回选择页不再需要常亮
+    // 拉锯到一半直接退出 / 右滑：力度条跟着收掉，别覆盖在选择页上
+    this.reelOn = false
+    this.hold = false
+    // 记一下时间：同一次右滑可能既触发系统返回、又触发 touchend/onswipe，
+    // 600ms 内不再响应"选择页右滑退出"，免得刚回到选择页就被同一次手势带走
+    this.backAt = Date.now()
+    this.phase = 'select'
+  },
+
+  /* ---------------- 返回 / 退出 ----------------
+   * 手环的"侧滑"就是系统返回：Vela 会先问页面 onBackPress()，
+   * 返回 true = 页面自己处理（应用不退出），返回 false = 走系统默认逻辑。
+   *
+   * 之前这里一个字都没实现，于是默认逻辑停在"没有上一页"上 ——
+   * 侧滑回到地图选择页之后就再也退不出应用了，只能长按关机。
+   *
+   * 现在两级：
+   *   游戏/结算  → 回到地图选择（自己处理，返回 true）
+   *   地图选择页 → 应用最后一屏，直接退出（$app.exit()）
+   */
+  onBackPress() {
+    if (this.phase !== 'select') {
+      this.backToSelect()
+      return true
+    }
+    if (this.quitApp()) return true
+    return false // 没有退出接口时交还系统默认逻辑
+  },
+
+  // 退出应用：手表文档里 $app.exit() 是正式入口；部分固件另有 $page.finish()
+  // 300ms 内不重复调用：同一次右滑可能同时打到 onBackPress / touchend / onswipe，
+  // 但不设永久开关 —— 万一某个固件 exit() 是"假成功"，隔一会儿再滑还能重试
+  quitApp() {
+    this.setKeepOn(false) // 退出前把常亮还回去
+    const now = Date.now()
+    if (now - (this.quitAt || 0) < 300) return true
+    try {
+      if (this.$app && typeof this.$app.exit === 'function') {
+        this.$app.exit()
+        this.quitAt = now
+        return true
+      }
+    } catch (e) {}
+    try {
+      if (this.$page && typeof this.$page.finish === 'function') {
+        this.$page.finish()
+        this.quitAt = now
+        return true
+      }
+    } catch (e) {}
+    return false
+  },
+
+  // 随机一个 y，尽量不和别的鱼重叠（重叠多了画面会糊成一团）
+  randFishY(h, skip) {
+    const top = FISH_TOP
+    const bottom = GROUND_Y - h - FISH_PAD
+    if (bottom <= top) return top
+    const list = this.g.fish || []
+    let fallback = top + Math.random() * (bottom - top)
+    for (let t = 0; t < 10; t++) {
+      const y = top + Math.random() * (bottom - top)
+      let ok = true
+      for (let i = 0; i < list.length; i++) {
+        const f = list[i]
+        if (f === skip) continue
+        const ov = Math.min(y + h, f.y + f.h) - Math.max(y, f.y)
+        if (ov > Math.min(h, f.h) * 0.5) {
+          ok = false
+          break
+        }
+      }
+      if (ok) return Math.round(y)
+      fallback = y
+    }
+    return Math.round(fallback)
+  },
+
+  /* ---------------- 主循环 ---------------- */
+  tick() {
+    if (this.phase !== 'playing') return
+
+    // 星标鱼拉锯中：计时的钟停住、鱼群也不游了（整个画面聚焦在力度条上），
+    // 只跑力度条物理与钩子收线 —— 这段不该继续扣倒计时。
+    if (this.reelOn) {
+      this.tickReel()
+      return
+    }
+
+    // 计时
+    this.acc += TICK
+    if (this.acc >= 1000) {
+      this.acc -= 1000
+      this.timeLeft -= 1
+      this.barW = Math.max(0, Math.round((this.hudS.barW * this.timeLeft) / this.timeTotal))
+      if (this.timeLeft <= 0) {
+        this.gameOver()
+        return
+      }
+    }
+
+    this.moveBoat()
+    this.tickFlip()
+    this.moveFish()
+    this.moveRare()
+    this.moveStar()
+    this.moveHook()
+
+    if (this.showGain) {
+      this.gainTick -= 1
+      if (this.gainTick <= 0) this.showGain = false
+    }
+  },
+
+  moveBoat() {
+    // 放钩/收线时停船，鱼线才不会从竿尖"脱开"
+    if (this.hookState !== 'idle') return
+
+    // 左右边界要跟着"竿朝哪边"变，这是"右边死角"的根：
+    //   朝右 → 钩挂在船右前方的竿尖上（boatX+108），钩右缘得留在屏内，
+    //          船只能开到 x=212，右边那 100 多像素就谁也钓不到；
+    //   朝左 → 钩改挂到船左前方（boatX+12），船可以一直开到右边缘，
+    //          右边由船身和竿自己填满，钩从左前方探出去钓。
+    // 两个方向轮流覆盖，整屏就没有永久够不着的角落了。
+    const right = this.faceDir > 0
+      ? DESIGN_W - (ROD_TIP_DX - HOOK_DX + HOOK_IMG_W) - 4
+      : DESIGN_W - RIG_IMG_W - RIG_IMG_DX - 2
+    const left = this.faceDir > 0 ? 2 : HOOK_DX - ROD_TIP_DX_L + 2
+
+    let x = this.boatX + 2.4 * STEP * this.boatDir
+    if (x <= left) {
+      x = left
+      this.boatDir = 1
+    } else if (x >= right) {
+      x = right
+      this.boatDir = -1
+    }
+    this.boatX = Math.round(x)
+    this.setFace(this.boatDir) // 掉头就把竿甩到另一边
+    this.syncRig()
+  },
+
+  /* ---------------- 掉头 & 转向 ----------------
+   * 竿是烘在位图里的，转不了角度，所以做了两张镜像图（rig.png / rig-l.png），
+   * 船往哪边走就用哪张 —— 竿尖、鱼线、钩自然都跑到"前方"去。
+   * 代价是钩/线的 x 会瞬移 ~96px，所以在掉头这一拍把它们藏两帧（66ms）：
+   * 眼睛读到的是"渔夫把竿甩到另一边"，而不是"线断了一下跳过去"。
+   */
+  setFace(dir) {
+    if (dir === this.faceDir) return
+    this.faceDir = dir
+    this.rigSrc = dir > 0 ? RIG_SRC_R : RIG_SRC_L
+    this.hookOp = 0
+    this.lineOp = 0
+    this.flipHide = 2
+    this.syncHook(true) // 竿尖换了边，钩和线立刻跟上（虽然这两帧看不见）
+  },
+
+  // 掉头后把钩/线的透明度还回来
+  tickFlip() {
+    if (this.flipHide <= 0) return
+    this.flipHide -= 1
+    if (this.flipHide <= 0) {
+      this.flipHide = 0
+      this.hookOp = 1
+      this.lineOp = 1
+    }
+  },
+
+  moveFish() {
+    const fish = this.g.fish
+    for (let i = 0; i < fish.length; i++) {
+      const f = fish[i]
+
+      // 1) 刚被钓走：跟着钩子往水面提，边提边淡出（钩子此时也在 17px/帧收线）
+      if (f.hop > 0) {
+        f.hop -= 1
+        f.y -= FISH_RISE * STEP
+        // 挂在钩子下面：钩子停在 HOOK_REST 时鱼也跟着停，不会自己继续往上飘
+        const hang = this.hookY + HOOK_IMG_H - 8
+        if (f.y < hang) f.y = hang
+        if (f.y < WATER_TOP + 4) f.y = WATER_TOP + 4
+        f.alpha = f.hop / FISH_HOP
+        if (f.hop <= 0) {
+          f.alpha = 0
+          f.wait = FISH_GAP + Math.floor(Math.random() * FISH_GAP_RND)
+        }
+        continue
+      }
+
+      // 2) 空档：这条泳道先空着，别"钓一条刷一条" —— 补位是延迟的，玩家不会盯着那个点
+      if (f.wait > 0) {
+        f.wait -= 1
+        if (f.wait <= 0) this.refill(i)
+        continue
+      }
+
+      // 3) 入场：淡入 + 由慢到快。半透明的鱼也钩不到（checkCatch 里判 alpha）
+      if (f.alpha < 1) {
+        f.alpha += FISH_FADE
+        if (f.alpha > 1) f.alpha = 1
+      }
+      if (f.warm < FISH_WARM) f.warm += 1
+      const pace = 0.35 + 0.65 * (f.warm / FISH_WARM)
+
+      f.x += f.speed * pace * STEP * f.dir
+      // 触边掉头，鱼永远完整地待在画面里。
+      // 三种做法里只有这个同时满足"不出界"和"不突兀"：
+      //   游出屏幕（原来的写法）→ 精灵框越过 0..336，页面长出可滚动区域，手指一滑整个背景平移；
+      //   屏内重生            → 鱼在某条泳道凭空出现，生硬；
+      //   掉头                → 位置连续，像鱼游到边界自己转身。
+      const maxX = DESIGN_W - f.w
+      if (f.x <= 0) {
+        f.x = 0
+        f.dir = 1
+      } else if (f.x >= maxX) {
+        f.x = maxX
+        f.dir = -1
+      }
+    }
+    this.syncFish()
+  },
+
+  // 补位：换一条新的，贴着屏边起步往屏内游（位置在框内，不会撑大页面）
+  refill(idx) {
+    const theme = THEMES[this.mapIdx]
+    const nf = this.rollFish()
+    nf.dir = Math.random() < 0.5 ? 1 : -1
+    nf.x = nf.dir > 0 ? 0 : DESIGN_W - nf.w
+    nf.speed = theme.speed * (0.9 + Math.random() * 0.4)
+    nf.y = this.randFishY(nf.h, nf)
+    nf.alpha = 0
+    nf.warm = 0
+    this.g.fish[idx] = nf
+  },
+
+  moveRare() {
+    const r = this.g.rare
+    if (!r) return
+
+    if (!this.rareOn) {
+      if (this.rareTimer <= 0) return
+      this.rareTimer -= 1
+      if (this.rareTimer > 0) return
+      // 出场：从右侧游入（淡入，别在边上"啪"地冒出来）
+      r.dir = -1
+      // 先算尺寸再算入场坐标：原来倒过来写，第一次出场时 r.w 还是 undefined，
+      // r.x 直接算成 NaN，这条金鱼其实一直是画在 left:NaN 上的
+      r.w = (SPR.fry[0].length + 2) * FUNIT
+      r.h = (SPR.fry.length + 2) * FUNIT
+      r.x = DESIGN_W - r.w
+      r.y = this.randFishY(r.h)
+      this.rW = r.w
+      this.rH = r.h
+      this.rSrc = r.srcL
+      this.rX = Math.round(r.x)
+      this.rY = Math.round(r.y)
+      this.rareLeft = 220 // ≈9 秒后离场
+      this.rareOn = true
+      r.alpha = 0
+      r.leaving = 0
+      this.rOp = 0
+      return
+    }
+
+    // 离场也是一段淡出，不是"到点直接消失"
+    if (r.leaving) {
+      r.x += 2.2 * STEP * r.dir
+      r.alpha -= 0.14
+      if (r.alpha <= 0) {
+        r.alpha = 0
+        this.rOp = 0
+        this.rareOn = false
+        this.rareTimer = 300
+        return
+      }
+    } else {
+      r.x += 2.2 * STEP * r.dir
+      r.alpha += 0.12
+      if (r.alpha > 1) r.alpha = 1
+      this.rareLeft -= 1
+      if (this.rareLeft <= 0 || r.x <= 0) r.leaving = 1
+    }
+    const op = r.alpha == null ? 1 : r.alpha
+    if (op !== this.rOp) this.rOp = op
+    const x = clampX(r.x, r.w)
+    if (x !== this.rX) this.rX = x
+  },
+
+  /* ---------------- 星标鱼 ---------------- */
+  // 倒计时到点后把一条普通泳道换成星标鱼（渲染槽只有 3 个，顶掉一条最省事）。
+  // 换的是"离钩子最远"的那条，而且从屏外游进来 —— 不会在玩家眼皮底下凭空变出来。
+  moveStar() {
+    // 场上有一条约等于"正在处理"，绝不再刷第二条；
+    // starUsed 是"本局唯一机会"，测试包会放开它（见 TEST.starRepeat）
+    if (this.g.star) return
+    if (this.starUsed && !(TEST.on && TEST.starRepeat)) return
+    if (this.starTimer > 0) {
+      this.starTimer -= 1
+      return
+    }
+    this.spawnStar()
+  },
+
+  spawnStar() {
+    const s = starOf(this.mapIdx)
+    const rows = SPR[s.shape]
+    if (!rows) return
+    const w = (rows[0].length + 2) * FUNIT
+    const h = (rows.length + 2) * FUNIT
+
+    const fish = this.g.fish
+    let slot = 0
+    let far = -1
+    for (let i = 0; i < fish.length; i++) {
+      // 优先顶掉"正正经经在游"的那条：正在被提走 / 空档补位的槽位接过来，
+      // 等于金鱼在一片空水里凭空出现
+      const live = fish[i].hop === 0 && fish[i].wait === 0
+      const d = Math.abs(fish[i].x + fish[i].w / 2 - this.hookX) - (live ? 0 : 10000)
+      if (d > far) {
+        far = d
+        slot = i
+      }
+    }
+
+    // 不凭空生成：星标鱼接手被顶掉那条鱼的位置、朝向和深度，
+    // 等于那条鱼当场"变成了金色"。位置连续，不会在画面中间冒出一个新东西。
+    const old = fish[slot] || {}
+    const oy = old.y == null ? this.randFishY(h) : old.y
+    const maxY = GROUND_Y - h - FISH_PAD
+    const star = {
+      shape: s.shape,
+      star: 1,
+      name: s.name,
+      w: w,
+      h: h,
+      value: s.value,
+      x: clampX(old.x || 0, w),
+      y: maxY > FISH_TOP ? Math.min(Math.max(FISH_TOP, oy), maxY) : FISH_TOP,
+      dir: old.dir > 0 ? 1 : -1,
+      // 星标鱼游得比同图普通鱼慢一档：稀有猎物，得给玩家反应时间
+      speed: Math.max(1.6, THEMES[this.mapIdx].speed * 0.8),
+      srcR: '/common/sprites/fish-' + this.mapIdx + '-star.png',
+      srcL: '/common/sprites/fish-' + this.mapIdx + '-star-l.png',
+      hop: 0,
+      wait: 0,
+      alpha: 1,
+      warm: FISH_WARM
+    }
+    fish[slot] = star
+    this.g.star = star
+    this.syncFish()
+
+    // 测试包：这条被拉走/游走后隔 starGap 帧再出下一条。
+    // 正式版这里不用管 —— starUsed 已经把本局锁死了。
+    if (TEST.on && TEST.starRepeat) this.starTimer = TEST.starGap
+  },
+
+  /* ---------------- 拉鱼力度条 ----------------
+   * 只有星标鱼会走到这里。普通鱼在 catchFish 里直接计分入护。
+   */
+  beginReel(f) {
+    const rows = SPR[f.shape] || [[1]]
+    this.reelOn = true
+    this.hold = false
+    this.reelHold = 0
+    this.reelAge = 0
+    this.reelFish = f
+    this.reelColor = '#f7c948'
+    this.reelBarColor = '#f7c948'
+    this.reelTip = '按住往上拉'
+
+    // 绿框变小之后，如果位置固定，玩家顶到那儿就只剩"守着不动" —— 所以让它自己上下游。
+    // 正弦运动：两端自然减速、中间最快，手感像鱼在水里游，而不是机械地来回弹。
+    // 振幅和方向每条鱼随机（0.6~0.9 满行程），左右方向也随机，背不下来。
+    this.reelZoneH = REEL_ZONE
+    this.reelAmp = 0.6 + Math.random() * 0.3
+    this.reelPhase = Math.random() * Math.PI * 2
+    this.reelDrift = REEL_DRIFT * (0.85 + Math.random() * 0.3) * (Math.random() < 0.5 ? 1 : -1)
+    this.reelZoneTop = this.zoneTopAt(this.reelPhase)
+
+    // 柱子从底部长起来，柱顶一开始在轨道最下方
+    this.reelFill = 0
+    this.reelTop = REEL_H
+    this.reelProg = 0
+
+    this.reelFishW = Math.min(78, (rows[0].length + 2) * FUNIT)
+    this.reelFishH = Math.round(this.reelFishW * ((rows.length + 2) / (rows[0].length + 2)))
+    this.reelSrc = f.dir > 0 ? f.srcR : f.srcL
+    this.reelFishTop = this.fishTopAt(this.reelZoneTop)
+
+    // 钩子顺势往回收（tickReel 里会继续走 moveHook）
+    this.hookState = 'reel'
+  },
+
+  // 相位 → 绿框上沿（正弦振荡，整体夹在轨道里，永远不会跑到框外面）
+  zoneTopAt(phase) {
+    const span = REEL_H - this.reelZoneH
+    if (span <= 0) return 0
+    const mid = span / 2
+    let t = mid + Math.sin(phase) * mid * this.reelAmp
+    if (t < 0) t = 0
+    if (t > span) t = span
+    return Math.round(t)
+  },
+
+  // 鱼的纵向位置：和绿框同高。轨道有 2px 边框，鱼挂在 .reel-body 里所以要补上这 2px
+  fishTopAt(zoneTop) {
+    let y = zoneTop + 2 + Math.round((this.reelZoneH - this.reelFishH) / 2)
+    if (y < 0) y = 0
+    if (y > REEL_H - this.reelFishH) y = REEL_H - this.reelFishH
+    return y
+  },
+
+  tickReel() {
+    this.reelAge += TICK
+
+    let h = this.reelFill + (this.hold ? REEL_UP : -REEL_DOWN)
+    if (h < 0) h = 0
+    if (h > REEL_H) h = REEL_H
+    this.reelFill = Math.round(h)
+    this.reelTop = REEL_H - this.reelFill
+
+    // 绿框（= 鱼）自己上下游：玩家得一直跟着它，不能顶上去就撒手
+    this.reelPhase += this.reelDrift
+    const zt = this.zoneTopAt(this.reelPhase)
+    if (zt !== this.reelZoneTop) this.reelZoneTop = zt
+    const ft = this.fishTopAt(zt)
+    if (ft !== this.reelFishTop) this.reelFishTop = ft
+
+    const zoneEnd = this.reelZoneTop + this.reelZoneH
+    const inZone = this.reelTop >= this.reelZoneTop && this.reelTop <= zoneEnd
+    if (inZone) {
+      this.reelHold += TICK
+      this.reelTip = '稳住 · 保持住'
+      this.reelColor = '#7ee08a'
+      this.reelBarColor = '#7ee08a'
+    } else {
+      // 柱顶一离开绿框，底下那条进度就往回泄 —— 光"停住不涨"太便宜了：
+      // 顶进去守着不动就能过，玩家不用跟着绿框跑。泄得比涨慢（0.6 倍），
+      // 所以短暂失手还能救回来，只有长时间跑偏才真的白干。
+      this.reelHold -= TICK * REEL_DRAIN
+      if (this.reelHold < 0) this.reelHold = 0
+      this.reelColor = '#f7c948'
+      if (this.reelHold > 0) {
+        this.reelTip = '滑掉了 · 快回绿框'
+        this.reelBarColor = '#e0642f' // 进度条转橙红 = 正在掉
+      } else {
+        this.reelTip = this.reelTop < this.reelZoneTop ? '太高了 · 松一点' : '按住 · 追上鱼'
+        this.reelBarColor = '#f7c948'
+      }
+    }
+    this.reelProg = Math.round(200 * Math.min(1, this.reelHold / REEL_NEED))
+
+    this.moveHook()
+
+    if (this.reelHold >= REEL_NEED) {
+      this.endReel(true)
+      return
+    }
+    if (this.reelAge >= REEL_LIMIT) this.endReel(false)
+  },
+
+  endReel(ok) {
+    const f = this.reelFish
+    this.reelOn = false
+    this.hold = false
+    this.reelTip = ''
+    this.reelFill = 0
+    this.reelTop = REEL_H
+    this.reelProg = 0
+    this.reelFish = null
+    this.starUsed = true // 这一局的星标鱼机会用掉了，不管成没成
+
+    if (ok && f) {
+      this.g.star = null
+      // 交回普通计分流程：先把 star 标记摘掉，否则 catchFish 又会被打回力度条
+      f.star = 0
+      this.catchFish(f, false)
+
+      // 挂到结算面板的"待入缸"位（只有星标鱼才有这个位）
+      const rows = SPR[f.shape] || [[1]]
+      this.pendingStar = tankId(this.mapIdx)
+      this.pendingName = f.name
+      /* 「★ 星标鱼 · 虹鳟」在窄屏 24 号字下要 216，面板内宽只剩 264 但要和 96 的鱼图并排 ——
+       * 所以窄屏只留「★ 虹鳟」，星标鱼三个字由面板上那颗 ★ 和金色表示。 */
+      this.pendingLabel = this.narrow ? '★ ' + f.name : '★ 星标鱼 · ' + f.name
+      this.pendingSrc = f.srcR
+      this.pendingW = this.pS.starImgW
+      this.pendingH = Math.max(24, Math.round(this.pS.starImgW * ((rows.length + 2) / (rows[0].length + 2))))
+      this.tankGot = false
+
+      // 之前就收过同一条的话，按钮直接显示"已入缸"
+      const self = this
+      storage.get({
+        key: TANK_KEY,
+        default: '',
+        success: function (data) {
+          const list = parseTank(data)
+          // 不用 Array.some：极老固件上不一定有，循环更保险
+          let got = false
+          for (let i = 0; i < list.length; i++) {
+            if (list[i].id === self.pendingStar) {
+              got = true
+              // 缸里这条是 v2.6 之前记的（老的 m:shape 没有时间戳）：这次又钓到了，
+              // 就把时间补上 —— 否则鱼缸页点开永远是"钓到时间未记录"，玩家没别的办法补。
+              if (!list[i].ts) {
+                list[i].ts = Date.now()
+                self.saveTank(list)
+              }
+            }
+          }
+          self.tankGot = got
+          self.tankCount = list.length
+        }
+      })
+      return
+    }
+
+    // 挣脱：换回一条普通鱼，连击清零，并给一句反馈
+    this.g.star = null
+    const fish = this.g.fish
+    const idx = f ? fish.indexOf(f) : -1
+    if (idx >= 0) {
+      const theme = THEMES[this.mapIdx]
+      const nf = this.rollFish()
+      // 鱼跑了：原地换回一条普通鱼（位置接着原来那条），不另外"生"一条出来
+      nf.dir = f && f.dir ? f.dir : Math.random() < 0.5 ? 1 : -1
+      nf.x = clampX(f ? f.x : 0, nf.w)
+      nf.speed = theme.speed * (0.9 + Math.random() * 0.4)
+      fish[idx] = nf
+      nf.y = f && f.y != null
+        ? Math.min(Math.max(FISH_TOP, f.y), GROUND_Y - nf.h - FISH_PAD)
+        : this.randFishY(nf.h, nf)
+    }
+    this.combo = 0
+    this.comboText = '1.0'
+    this.syncFish()
+
+    this.gainText = '鱼跑了'
+    this.gainX = 132
+    this.gainY = 250
+    this.showGain = true
+    this.gainTick = 22
+  },
+
+  moveHook() {
+    // 钩静止时一个属性都不用写（之前每帧都重算一遍，白烧一半算力）
+    if (this.hookState === 'idle') return
+
+    if (this.hookState === 'drop') {
+      this.hookY = Math.round(this.hookY + 13 * STEP)
+      if (this.checkCatch()) {
+        this.hookState = 'reel'
+      } else if (this.hookY >= HOOK_BOTTOM) {
+        this.hookY = HOOK_BOTTOM
+        this.hookState = 'reel'
+        // 空钩：连击清零
+        if (this.combo > 0) {
+          this.combo = 0
+          this.comboText = '1.0'
+        }
+      }
+    } else if (this.hookState === 'reel') {
+      this.hookY = Math.round(this.hookY - 17 * STEP)
+      if (this.hookY <= HOOK_REST) {
+        this.hookY = HOOK_REST
+        this.hookState = 'idle'
+      }
+    }
+    this.syncHook()
+  },
+
+  // 钓具随船平移：船坐标变了才挪图，然后顺手把钩/线也带过去
+  // （之前这里只挪船，moveHook 在 idle 时又直接 return，等于钩和线永远停在开局位置）
+  syncRig() {
+    const x = this.boatX + RIG_IMG_DX
+    if (x !== this.rigX) this.rigX = x
+    this.syncHook()
+  },
+
+  // 鱼钩：船不动时钩的横坐标不用碰；线长只有整数 y 变了才写
+  syncHook(force) {
+    // 竿尖跟着船头朝向换边：朝右挂 boatX+108，朝左挂 boatX+12
+    const tipX = this.boatX + (this.faceDir > 0 ? ROD_TIP_DX : ROD_TIP_DX_L)
+    if (force || tipX !== this.hookX) {
+      this.hookX = tipX
+      this.hookLX = tipX - HOOK_DX
+      this.lineX = tipX - 1
+    }
+    const lh = this.hookY > LINE_TOP ? this.hookY - LINE_TOP : 0
+    if (force || lh !== this.lineH) this.lineH = lh
+  },
+
+  // 三条鱼：坐标变了才写 left/top，转向才换图
+  syncFish() {
+    const f = this.g.fish
+    const a = f[0]
+    const b = f[1]
+    const c = f[2]
+    // 星标鱼头顶的 ★：三个渲染槽里哪个是星标鱼就跟到哪
+    let sx = -1
+    let sy = -1
+    if (a) {
+      const x = clampX(a.x, a.w)
+      const y = clampY(a.y, a.h)
+      const src = a.dir > 0 ? a.srcR : a.srcL
+      if (x !== this.f1x) this.f1x = x
+      if (y !== this.f1y) this.f1y = y
+      if (src !== this.f1src) this.f1src = src
+      // 重生会换鱼种：尺寸跟着换（比较后才写，稳定时不多写一次属性）
+      if (a.w !== this.f1w) this.f1w = a.w
+      if (a.h !== this.f1h) this.f1h = a.h
+      const op1 = a.alpha == null ? 1 : a.alpha
+      if (op1 !== this.f1op) this.f1op = op1
+      if (a.star && showStar(a)) {
+        sx = Math.max(0, Math.min(DESIGN_W - 22, x + Math.round(a.w / 2) - 11))
+        sy = Math.max(0, y - 16)
+      }
+    }
+    if (b) {
+      const x = clampX(b.x, b.w)
+      const y = clampY(b.y, b.h)
+      const src = b.dir > 0 ? b.srcR : b.srcL
+      if (x !== this.f2x) this.f2x = x
+      if (y !== this.f2y) this.f2y = y
+      if (src !== this.f2src) this.f2src = src
+      if (b.w !== this.f2w) this.f2w = b.w
+      if (b.h !== this.f2h) this.f2h = b.h
+      const op2 = b.alpha == null ? 1 : b.alpha
+      if (op2 !== this.f2op) this.f2op = op2
+      if (b.star && showStar(b)) {
+        sx = Math.max(0, Math.min(DESIGN_W - 22, x + Math.round(b.w / 2) - 11))
+        sy = Math.max(0, y - 16)
+      }
+    }
+    if (c) {
+      const x = clampX(c.x, c.w)
+      const y = clampY(c.y, c.h)
+      const src = c.dir > 0 ? c.srcR : c.srcL
+      if (x !== this.f3x) this.f3x = x
+      if (y !== this.f3y) this.f3y = y
+      if (src !== this.f3src) this.f3src = src
+      if (c.w !== this.f3w) this.f3w = c.w
+      if (c.h !== this.f3h) this.f3h = c.h
+      const op3 = c.alpha == null ? 1 : c.alpha
+      if (op3 !== this.f3op) this.f3op = op3
+      if (c.star && showStar(c)) {
+        sx = Math.max(0, Math.min(DESIGN_W - 22, x + Math.round(c.w / 2) - 11))
+        sy = Math.max(0, y - 16)
+      }
+    }
+
+    const d = f[3]
+    if (d) {
+      const x = clampX(d.x, d.w)
+      const y = clampY(d.y, d.h)
+      const src = d.dir > 0 ? d.srcR : d.srcL
+      if (x !== this.f4x) this.f4x = x
+      if (y !== this.f4y) this.f4y = y
+      if (src !== this.f4src) this.f4src = src
+      if (d.w !== this.f4w) this.f4w = d.w
+      if (d.h !== this.f4h) this.f4h = d.h
+      const op4 = d.alpha == null ? 1 : d.alpha
+      if (op4 !== this.f4op) this.f4op = op4
+      if (d.star && showStar(d)) {
+        sx = Math.max(0, Math.min(DESIGN_W - 22, x + Math.round(d.w / 2) - 11))
+        sy = Math.max(0, y - 16)
+      }
+    }
+
+    // 只有真有星标鱼在场上才挂这个节点（没变化不写属性）
+    const on = sx >= 0
+    if (on !== this.starOn) this.starOn = on
+    if (on) {
+      if (sx !== this.starX) this.starX = sx
+      if (sy !== this.starY) this.starY = sy
+    }
+  },
+
+  // 开局把三条鱼的尺寸/图源铺一次（尺寸由 SPR 决定，不用手写魔数）
+  layoutFish() {
+    const f = this.g.fish
+    if (f.length < 3) return
+    this.f1w = f[0].w
+    this.f1h = f[0].h
+    this.f2w = f[1].w
+    this.f2h = f[1].h
+    this.f3w = f[2].w
+    this.f3h = f[2].h
+    this.f1src = f[0].dir > 0 ? f[0].srcR : f[0].srcL
+    this.f2src = f[1].dir > 0 ? f[1].srcR : f[1].srcL
+    this.f3src = f[2].dir > 0 ? f[2].srcR : f[2].srcL
+    if (f[3]) {
+      this.f4w = f[3].w
+      this.f4h = f[3].h
+      this.f4src = f[3].dir > 0 ? f[3].srcR : f[3].srcL
+    }
+    this.syncFish()
+  },
+
+  /* ---------------- 判定 ---------------- */
+  checkCatch() {
+    // 钩的判定框（略宽松，手感更好）
+    const hx = this.hookX - 16
+    const hy = this.hookY + 6
+    const hw = 32
+    const hh = 34
+
+    const fish = this.g.fish
+    for (let i = 0; i < fish.length; i++) {
+      const f = fish[i]
+      // 正在被提走 / 还没游进来的鱼不算数（不然会钩到半透明的"幽灵鱼"）
+      if (f.hop > 0 || f.wait > 0 || f.alpha < 0.5) continue
+      if (this.hitBox(hx, hy, hw, hh, f)) {
+        this.catchFish(f, false)
+        return true
+      }
+    }
+    const r = this.g.rare
+    if (r && this.rareOn && !r.leaving) {
+      const fake = {
+        x: r.x,
+        y: r.y,
+        w: (SPR.fry[0].length + 2) * FUNIT,
+        h: (SPR.fry.length + 2) * FUNIT,
+        value: 36 // 稀有金鱼：约 6 条大鱼的量
+      }
+      if (this.hitBox(hx, hy, hw, hh, fake)) {
+        this.catchFish(fake, true)
+        return true
+      }
+    }
+    return false
+  },
+
+  hitBox(hx, hy, hw, hh, f) {
+    const pad = 7
+    return (
+      hx < f.x + f.w - pad &&
+      hx + hw > f.x + pad &&
+      hy < f.y + f.h - pad &&
+      hy + hh > f.y + pad
+    )
+  },
+
+  catchFish(f, isRare) {
+    // 星标鱼不直接入护：先拉一段（力度条只在这时启用），拉上来才计分
+    if (f.star) {
+      this.beginReel(f)
+      return
+    }
+    const theme = THEMES[this.mapIdx]
+    this.combo = Math.min(this.combo + 1, 6)
+    const comboMult = 1 + (this.combo - 1) * 0.25
+    this.comboText = comboMult.toFixed(1)
+    const gain = Math.round(f.value * theme.mult * comboMult)
+
+    this.score += gain
+    this.caught += 1
+
+    // 飘字
+    this.gainText = '+' + gain
+    this.gainX = Math.max(8, Math.min(DESIGN_W - 64, Math.round(f.x + f.w / 2 - 16)))
+    this.gainY = Math.max(52, Math.round(f.y - 18))
+    this.showGain = true
+    this.gainTick = 14
+
+    if (isRare) {
+      // 金鱼被钓走也是淡出，不是"啪"地消失；淡完了 moveRare 自己关节点
+      const rr = this.g.rare
+      if (rr) {
+        rr.leaving = 1
+        rr.alpha = 1
+        this.rOp = 1
+      }
+      this.rareLeft = 0
+    } else {
+      // 被钓到的鱼不原地换一条（那样等于"钓一条刷一条"，很假）。
+      // 让它先跟着钩子被提出水面（hop），这条泳道空一拍，再从边上补一条进来。
+      f.hop = FISH_HOP
+      f.alpha = 1
+      f.warm = FISH_WARM
+      f.value = 0 // 提走途中不再计分 / 不再被钩
+    }
+  },
+
+  /* ---------------- 交互 ---------------- */
+  // 长按退出：游戏中没有按钮也不至于卡在这儿（鱼游出屏、误触拖动都能靠它脱身）
+  /* ---------------- 侧滑 ---------------- */
+
+  // 手指按下：记起点，顺便清掉上一次的滑动标记
+  onTouchStart(e) {
+    const t = (e.touches && e.touches[0]) || (e.changedTouches && e.changedTouches[0])
+    if (!t) return
+    this.tx0 = t.clientX
+    this.ty0 = t.clientY
+    this.swiped = false
+    if (this.reelOn) this.hold = true // 力度条：按下 = 往上顶
+  },
+
+  // 抬手：横向右滑够远、且基本水平 → 游戏里回地图选择，选择页则退出应用
+  onTouchEnd(e) {
+    if (this.reelOn) this.hold = false // 松手 = 柱子开始下沉
+    if (this.tx0 < 0) return
+    const t = (e.changedTouches && e.changedTouches[0]) || (e.touches && e.touches[0])
+    if (!t) return
+    const dx = t.clientX - this.tx0
+    const dy = t.clientY - this.ty0
+    this.tx0 = -1
+    if (dx < SWIPE_DX || Math.abs(dy) > SWIPE_DY) return
+
+    this.swiped = true // 这次滑动别顺带触发"放钩"
+    if (this.phase === 'select') {
+      // 地图选择页已经是最后一屏，再右滑就是退出应用
+      if (this.sinceBack() > 600) this.quitApp()
+    } else {
+      this.backToSelect()
+    }
+  },
+
+  // 兜底：部分固件的 touchmove 不连续，用系统的 swipe 事件再补一次
+  onSwipe(e) {
+    if (!e || e.direction !== 'right') return
+    if (this.phase === 'select') {
+      if (this.sinceBack() > 600) this.quitApp()
+      return
+    }
+    this.swiped = true
+    this.backToSelect()
+  },
+
+  // 距离上次回到选择页过去了多少毫秒（用来吃掉同一次手势的第二遍响应）
+  sinceBack() {
+    return Date.now() - (this.backAt || 0)
+  },
+
+  onTap() {
+    // 拉锯中抬手也算一次 click：这里必须挡住，否则会把钩子重新放下去
+    // （钩子一落又可能命中同一条星标鱼，把力度条进度重置）
+    if (this.reelOn) return
+    // 右滑返回的那一次抬手不要再放钩
+    if (this.swiped) {
+      this.swiped = false
+      return
+    }
+    if (this.phase !== 'playing') return
+    if (this.hookState === 'idle') {
+      this.hookState = 'drop'
+    }
+  },
+
+  /* ---------------- 结算 ---------------- */
+  gameOver() {
+    this.stopLoop() // 结算面板是静态的，循环没必要继续烧电
+    this.reelOn = false // 万一在拉锯里被结束（防御性写法），别让力度条压在面板上
+    this.hold = false
+    this.phase = 'over'
+    this.hookState = 'idle'
+    this.hookY = HOOK_REST
+    this.syncHook()
+    // 积分 = 历史累计得分，等级由它换算（每局都把这一局的分加进去）
+    const before = levelInfo(this.total || 0)
+    this.total = (this.total || 0) + this.score
+    try {
+      storage.set({ key: LEVEL_KEY, value: String(this.total) })
+    } catch (e) {}
+    this.applyLevel()
+    this.lvUp = levelInfo(this.total).level > before.level
+
+    // 这一局刚好跨过某张地图的解锁等级：在结算面板上单独报一句
+    this.lvNewMap = ''
+    for (let i = 0; i < THEMES.length; i++) {
+      const need = THEMES[i].needLv
+      if (need > before.level && need <= this.lvLevel) this.lvNewMap = THEMES[i].name
+    }
+
+    const best = this.bests[this.mapIdx] || 0
+    if (this.score > best) {
+      const arr = this.bests.slice()
+      arr[this.mapIdx] = this.score
+      this.bests = arr
+      this.bestOfMap = this.score
+      this.isNewBest = true
+      try {
+        storage.set({ key: BEST_KEY + this.mapIdx, value: String(this.score) })
+      } catch (e) {}
+      this.refreshMaps() // 卡片上的"最高 N 分"跟着刷新（回选择页就能看到）
+    } else {
+      this.bestOfMap = best
+      this.isNewBest = false
+    }
+  }
+}
+</script>
+
+<style>
+/*
+ * 像素风钓鱼 · 小米手环 10 Pro（336x480，designWidth=336）
+ * 圆角一律 0，边框用 2~3px 硬边。
+ * 所有精灵都是"扁平像素块"：每块自带绝对 left/top，不用容器包裹
+ * （容器在真机上会导致整组不渲染）。每帧只重建真正移动了的那几组。
+ */
+.page {
+  width: 336px;
+  height: 480px;
+  flex-direction: column;
+  overflow: hidden;
+  background-color: #000000;
+}
+
+.px {
+  position: absolute;
+}
+
+/* 位图精灵：object-fit 必须是 fill。
+ *
+ * 这里踩过一次坑：原来写 object-fit: none（"不缩放就不糊边"），在 336 物理宽的 Pro 上
+ * 恰好 1:1 所以一直没暴露。手环 11 是 212 物理宽 / 336 设计宽，整块画布缩 0.631 倍，
+ * 而 none 是"按图片自己的物理像素画" —— 110x60 的鱼图塞进 69x38 的框，中间那截留下来、
+ * 头尾被裁掉，鱼就变成一个个"面包"（真机截图里就是这个样子）。
+ *
+ * 节点的宽高本来就等于图片的原始尺寸（鱼 110x60、船 101x96、背景 336x356、水底 336x124），
+ * 所以 fill 在 Pro 上和 none 等价（1:1，一个像素都不差），在窄屏上则是整张图等比缩到框里。
+ */
+.spr {
+  position: absolute;
+  object-fit: fill;
+}
+
+.line {
+  position: absolute;
+  width: 2px;
+  background-color: rgba(255, 255, 255, 0.5);
+}
+
+/* 兜底水体（被全屏底图覆盖，只在底图不显示时才看得见）；304 = 480 - WATER_TOP(176) */
+.wx {
+  position: absolute;
+  left: 0px;
+  top: 176px; /* = WATER_TOP：兜底水体必须从水面往下铺，别让它从 0 开始占住上半屏 */
+  width: 336px;
+  height: 304px; /* 480 - 176 */
+}
+
+/* ---------------- 顶部 HUD ---------------- */
+.bar-bg {
+  position: absolute;
+  left: 0px;
+  top: 0px;
+  width: 336px;
+  height: 4px;
+  flex-direction: row;
+  background-color: rgba(0, 0, 0, 0.45);
+}
+
+.bar-fill {
+  height: 4px;
+}
+
+.hud {
+  position: absolute;
+  left: 0px;
+  top: 8px;
+  width: 336px;
+  height: 46px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  padding-left: 14px;
+  padding-right: 14px;
+}
+
+.hud-score {
+  color: #ffffff;
+  font-size: 34px;
+  font-weight: bold;
+}
+
+.hud-combo {
+  font-size: 15px;
+  letter-spacing: 1px;
+  margin-right: 8px;
+}
+
+.hud-time {
+  color: #ffffff;
+  font-size: 26px;
+  font-weight: bold;
+}
+
+.hint {
+  position: absolute;
+  left: 0px;
+  top: 408px;
+  width: 336px;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 15px;
+}
+
+.star-tag {
+  position: absolute;
+  width: 22px;
+  text-align: center;
+  color: #ffe066;
+  font-size: 17px;
+  font-weight: bold;
+}
+
+.gain {
+  position: absolute;
+  font-size: 22px;
+  font-weight: bold;
+}
+
+/* ---------------- 地图选择 ---------------- */
+.sel {
+  width: 336px;
+  height: 480px;
+  flex-direction: column;
+  align-items: flex-start;
+  background-color: #0b0f0c;
+}
+
+.sel-head {
+  width: 336px;
+  flex-direction: column;
+  align-items: center;
+  margin-top: 8px;
+  margin-bottom: 2px;
+}
+
+.sel-title {
+  color: #ffffff;
+  font-size: 34px;
+  letter-spacing: 2px;
+}
+
+.sel-sub {
+  color: rgba(255, 255, 255, 0.42);
+  font-size: 14px;
+  letter-spacing: 1px;
+  margin-top: 2px;
+}
+
+/* 可滚动的地图列表：去掉底部常驻提示行后，卡片区可以再长一截（314 → 320）；
+   后来又给矩形屏让了 15 的底部留白，回到 305。一屏露出 3 张 + 1/20 张。
+   露出的那一角就是"下面还有"的暗示，不加页码点。
+   这个数别再往上加了：锁图提示（sel-foot-lock）出现时占一行 22px，
+   cards 一长就会把三个胶囊顶出屏幕下沿。 */
+/* 可滚动的地图列表。高度、单元格高度都是内联的（setViewport 按画布高算）：
+   305（Pro 480）一屏 3.05 张；446（手环 11 824）配 186 的单元格，一屏 2.4 张。
+   露出的那半张就是"下面还有"的暗示，不加页码点。 */
+.cards {
+  width: 336px;
+  height: 305px;
+  flex-grow: 1;
+}
+
+/* 单元格高度内联（宽屏 120 / 窄屏 186），这里只留默认值 */
+.card-cell {
+  width: 336px;
+  height: 120px;
+}
+
+/* 卡片尺寸也内联（宽屏 336x118 / 窄屏 300x174），理由见 cardSizes()。
+   overflow: hidden 是兜底：窄屏字号放到 38/30 之后，万一某版固件的行高比 1.2 还大，
+   文字宁可被裁一点点，也不能顶出卡片、把整页排版顶乱。 */
+.card {
+  width: 336px;
+  height: 118px;
+  margin-left: 0px;
+  margin-bottom: 2px;
+  background-color: #15191c;
+  border-width: 2px;
+  border-style: solid;
+  flex-direction: row;
+  align-items: center;
+  overflow: hidden;
+}
+
+.pv {
+  position: relative;
+  width: 89px;
+  height: 89px;
+  margin-left: 10px;
+  overflow: hidden;
+}
+
+.pv-water {
+  position: absolute;
+  left: 0px;
+  top: 41px;
+  width: 89px;
+  height: 31px;
+}
+
+.pv-deep {
+  position: absolute;
+  left: 0px;
+  top: 67px;
+  width: 89px;
+  height: 22px;
+}
+
+.pv-wave1 {
+  position: absolute;
+  left: 0px;
+  top: 30px;
+  width: 12px;
+  height: 4px;
+}
+
+.pv-wave2 {
+  position: absolute;
+  left: 24px;
+  top: 30px;
+  width: 10px;
+  height: 4px;
+}
+
+.pv-tail {
+  position: absolute;
+  left: 20px;
+  top: 42px;
+  width: 10px;
+  height: 12px;
+}
+
+.pv-fish {
+  position: absolute;
+  left: 28px;
+  top: 44px;
+  width: 28px;
+  height: 9px;
+}
+
+.pv-eye {
+  position: absolute;
+  left: 50px;
+  top: 46px;
+  width: 4px;
+  height: 4px;
+  background-color: #101010;
+}
+
+/* 未解锁：预览框压一层暗色，中间一把锁 */
+.pv-lock {
+  position: absolute;
+  left: 0px;
+  top: 0px;
+  width: 89px;
+  height: 89px;
+  background-color: rgba(0, 0, 0, 0.55);
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.pv-lock-t {
+  width: 89px;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 26px;
+}
+
+.card-info {
+  width: 221px;
+  margin-left: 12px;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+/* 下面这几个字号/宽度都只是"宽屏默认值"：
+   真机上由 setViewport 算出的内联 style 覆盖（窄屏手环 11 会放大字号、把星级竖排），
+   所以这里的数值必须和 cardSizes(false) 保持一致，改一处要改两处。 */
+.card-name {
+  font-size: 24px;
+}
+
+.card-desc {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 19px;
+  margin-top: 6px;
+}
+
+/* 星级 + 最高分：宽屏并排一行，窄屏竖排两行（flex-direction 内联覆盖） */
+.card-row {
+  width: 221px;
+  height: 29px;
+  flex-direction: row;
+  align-items: center;
+  margin-top: 5px;
+}
+
+.card-star {
+  font-size: 22px;
+}
+
+.card-best {
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 19px;
+  margin-left: 12px;
+}
+
+/* ---------------- 结算 ---------------- */
+.mask {
+  position: absolute;
+  left: 0px;
+  top: 0px;
+  width: 336px;
+  height: 480px;
+  background-color: rgba(0, 0, 0, 0.78);
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 结算 / 关于共用的面板。
+   flex-direction 必须显式写 column：漏了它真机会按 row 排，
+   标题、分数、说明、按钮全部横着挤成一行，文字被压成竖排（就是"字体紊乱"） */
+.panel {
+  width: 272px;
+  flex-direction: column;
+  background-color: #10161a;
+  border-width: 2px;
+  border-style: solid;
+  padding-top: 16px;
+  padding-bottom: 16px;
+  align-items: center;
+}
+
+/* panel 里的文字一律给死宽度 + 居中：Vela 的 text 在 align-items:center 下
+   会收缩到"一个字的宽度"，不设宽度就会逐字换行 */
+.panel-title {
+  width: 240px;
+  text-align: center;
+  font-size: 22px;
+  letter-spacing: 2px;
+}
+
+.panel-score {
+  width: 240px;
+  text-align: center;
+  color: #ffffff;
+  font-size: 56px;
+  font-weight: bold;
+  margin-top: 2px;
+}
+
+.panel-line {
+  width: 240px;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 16px;
+  margin-top: 4px;
+}
+
+.panel-best {
+  width: 240px;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 15px;
+  margin-top: 6px;
+}
+
+.btns {
+  flex-direction: row;
+  margin-top: 14px;
+}
+
+.btn {
+  width: 106px;
+  height: 44px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  margin-left: 5px;
+  margin-right: 5px;
+}
+
+.btn-t {
+  width: 100px;
+  text-align: center;
+  color: #0b0f0c;
+  font-size: 16px;
+  font-weight: bold;
+}
+
+.btn-ghost {
+  width: 106px;
+  height: 44px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-width: 2px;
+  border-style: solid;
+  margin-left: 5px;
+  margin-right: 5px;
+}
+
+/* ---------------- 底部入口（等级 / 鱼缸 / 关于） ----------------
+ * 宽屏：三个 102x50 的胶囊一行并排，(102 + 6) * 3 = 324，左右各留 6。
+ * 窄屏：上下两行 —— 一行两个（等级/鱼缸）+ 一行一个（关于），尺寸全由 cardSizes 内联给。
+ * 外层 .entry-wrap 永远是 column：宽屏只有一行，多一层不影响；窄屏两行靠它竖排。
+ * 行与行之间的间距由第二行的 margin-top 内联给（窄屏 10），.entry-row 自己归零 ——
+ * 否则类里的 margin-top 会和 wrap 的 margin-top 叠起来，宽屏会莫名往下掉 4px。 */
+.entry-wrap {
+  width: 336px;
+  flex-direction: column;
+  align-items: center;
+  /* 不许被压缩：内容超高时让列表（.cards）让位，按钮必须整块留在屏幕里 */
+  flex-shrink: 0;
+}
+
+/* 底部安全区占位（高度内联 = cardSizes().padB）。
+   为什么不用 .sel 的 padding-bottom：content-box 下 padding 不计入 height，
+   子节点照样排到屏幕最下沿 —— 见模板里的注释。 */
+.sel-gap {
+  width: 336px;
+  flex-shrink: 0;
+}
+
+.entry-row {
+  width: 336px;
+  margin-top: 0px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+}
+
+.entry {
+  width: 102px;
+  height: 50px;
+  margin-left: 3px;
+  margin-right: 3px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  background-color: #191e22;
+  border-width: 2px;
+  border-style: solid;
+  border-radius: 25px;
+}
+
+/* 两个字「等级」：给死宽度才居中（text 在 row 里会收缩到字宽） */
+.entry-t {
+  width: 96px;
+  text-align: center;
+  font-size: 18px;
+}
+
+/* 只有一个字的「关于」：给死宽度才居中 */
+.entry-t2 {
+  width: 120px;
+  text-align: center;
+  font-size: 18px;
+}
+
+/* 「★ 鱼缸」「关于」：三个字宽，给死宽度居中 */
+.entry-t3 {
+  width: 96px;
+  text-align: center;
+  font-size: 18px;
+}
+
+/* 点到未解锁地图时的提示：只在出错时才出现，1.8 秒后自己消失
+   （"上下滑动看地图"那句常驻提示已经去掉了 —— 卡片露出的一角本身就说明可以滑）。
+   绝对定位浮在列表下沿之上（bottom 由 cardS.lockBottom 内联给），不占流 ——
+   占流的话这一行会把列表挤矮，列表底部"露一角"的滚动提示就没了。 */
+.sel-foot-lock {
+  position: absolute;
+  left: 0px;
+  bottom: 75px;
+  width: 336px;
+  text-align: center;
+  color: #ff8f86;
+  font-size: 16px;
+  font-weight: bold;
+}
+
+/* 结算面板：本局刚解锁的新地图 */
+.panel-unlock {
+  width: 240px;
+  text-align: center;
+  color: #ffd166;
+  font-size: 16px;
+  font-weight: bold;
+  margin-top: 6px;
+}
+
+/* 结算面板里的等级进度 */
+.panel-gain {
+  width: 240px;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 15px;
+  margin-top: 8px;
+}
+
+.panel-bar {
+  width: 240px;
+  height: 8px;
+  margin-top: 6px;
+  background-color: rgba(255, 255, 255, 0.14);
+  flex-direction: row;
+}
+
+.panel-fill {
+  height: 8px;
+}
+
+.panel-lvup {
+  width: 240px;
+  text-align: center;
+  font-size: 16px;
+  font-weight: bold;
+  margin-top: 8px;
+}
+
+/* ---------------- 结算面板里的星标鱼 / 入缸 ----------------
+   只有钓到星标鱼才会渲染这一块（模板上的 if），普通鱼没有按钮。
+   面板高度已经贴着 480 的上限，这里必须紧凑：一行鱼 + 一行操作。 */
+.star-box {
+  width: 240px;
+  flex-direction: column;
+  align-items: center;
+  margin-top: 8px;
+  padding-top: 6px;
+  padding-bottom: 6px;
+  border-top-width: 1px;
+  border-top-style: solid;
+  border-top-color: rgba(247, 201, 72, 0.35);
+}
+
+.star-row {
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+}
+
+.star-img {
+  margin-right: 6px;
+}
+
+.star-name {
+  width: 150px;
+  text-align: left;
+  color: #f7c948;
+  font-size: 15px;
+  font-weight: bold;
+}
+
+.star-btn {
+  width: 148px;
+  height: 34px;
+  margin-top: 6px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background-color: #f7c948;
+  border-radius: 17px;
+}
+
+.star-btn-t {
+  width: 136px;
+  text-align: center;
+  color: #2a1c00;
+  font-size: 15px;
+  font-weight: bold;
+}
+
+.star-done {
+  width: 240px;
+  text-align: center;
+  color: rgba(247, 201, 72, 0.85);
+  font-size: 14px;
+  margin-top: 6px;
+}
+
+/* ---------------- 拉鱼力度条 ----------------
+   参考星露谷那根竖条：左侧刻度、中间柱子、绿色目标区，
+   柱子顶到绿区里才算"稳住"。整块只在 reelOn 时挂载，正常游戏零开销。 */
+.reel {
+  position: absolute;
+  left: 0px;
+  top: 0px;
+  width: 336px;
+  height: 480px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(4, 8, 10, 0.74);
+}
+
+.reel-head {
+  width: 300px;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.reel-title {
+  width: 300px;
+  text-align: center;
+  color: #f7c948;
+  font-size: 24px;
+  font-weight: bold;
+  letter-spacing: 1px;
+}
+
+.reel-sub {
+  width: 300px;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 14px;
+  margin-top: 2px;
+}
+
+.reel-body {
+  width: 182px;
+  height: 264px;
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: flex-start;
+  border-width: 3px;
+  border-style: solid;
+  /* 外框固定深灰：只有目标区和进度条跟着状态变色，否则整框变绿会被误读成"整条都算" */
+  border-color: #3a4650;
+  background-color: #161b1f;
+  padding: 4px;
+}
+
+/* 左刻度：11 根横档，均匀分布（justify-content 在列方向就是纵向分布） */
+.reel-scale {
+  width: 12px;
+  height: 246px;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.reel-tick {
+  width: 12px;
+  height: 2px;
+  background-color: rgba(255, 255, 255, 0.42);
+}
+
+/* 轨道：内容区 50x246，柱子与绿区都绝对定位在它内部 */
+.reel-track {
+  position: relative;
+  width: 64px;
+  height: 246px;
+  margin-left: 6px;
+  border-width: 2px;
+  border-style: solid;
+  border-color: #2f363c;
+  background-color: #0b0f12;
+  overflow: hidden;
+}
+
+.reel-zone {
+  position: absolute;
+  left: 2px;
+  width: 56px;
+  border-width: 2px;
+  border-style: solid;
+  background-color: rgba(96, 220, 130, 0.30);
+}
+
+.reel-fill {
+  position: absolute;
+  left: 3px;
+  width: 54px;
+  background-color: #5aa8dc;
+}
+
+/* 柱子最上面那一截 = 判定点。固定亮黄，和绿色目标区形成对比，
+   否则柱顶一变绿就和目标区糊在一起，看不出到底顶到没顶到 */
+.reel-cap {
+  width: 54px;
+  height: 12px;
+  background-color: #ffd166;
+}
+
+/* 鱼的纵向位置由 reelFishTop 每帧写进 style.margin-top（跟着绿框上下游），
+   这里只定位横向，别再写死 margin-top，否则会被内联样式盖住、改半天没反应 */
+.reel-fish {
+  margin-left: 8px;
+}
+
+.reel-bar {
+  width: 200px;
+  height: 10px;
+  margin-top: 12px;
+  background-color: rgba(255, 255, 255, 0.16);
+  flex-direction: row;
+}
+
+.reel-bar-fill {
+  height: 10px;
+}
+
+.reel-tip {
+  width: 300px;
+  text-align: center;
+  font-size: 17px;
+  font-weight: bold;
+  margin-top: 8px;
+}
+
+</style>

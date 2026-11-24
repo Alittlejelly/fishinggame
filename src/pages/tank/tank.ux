@@ -1,0 +1,748 @@
+<template>
+  <!--
+    鱼缸页：独立页面（router.push 进来），不是弹窗。
+    只放星标鱼 —— 每张地图各一条，共 7 个缸位。
+    布局约定与 level.ux / about.ux 一致：容器显式 flex-direction、
+    text 给死宽度、根节点 overflow: hidden、靠 margin 撑开。
+
+    这一版把"7 个静态格子"换成了"真缸"：鱼在水里各自游，点一下看钓到的时间。
+    格子布局没了，但收集进度（n/7）靠副标题和底部"还差几条"照样在。
+  -->
+  <div class="page" style="height: {{vh}}px;" ontouchstart="onTouchStart" ontouchend="onTouchEnd" onswipe="onSwipe">
+
+    <div class="hdr" style="top: {{hdrTop}}px;">
+      <text class="hdr-t" style="width: {{tk.tankW}}px; font-size: {{tk.hdrT}}px;">我的鱼缸</text>
+      <text class="hdr-s" style="width: {{tk.tankW}}px; font-size: {{tk.hdrS}}px;">星标鱼 {{got}} / {{total}} · 每张地图一条</text>
+    </div>
+
+    <!-- 缸体：绝对定位，尺寸由 tankSizes() 给（宽屏 300x256 / 手环 11 300x460） -->
+    <div class="tank" style="left: {{tankL}}px; top: {{tankTop}}px; width: {{tk.tankW}}px; height: {{tk.tankH}}px;">
+      <div class="water" style="width: {{tk.tankW}}px; height: {{tk.tankH}}px;"></div>
+      <div class="surface" style="width: {{tk.tankW}}px;"></div>
+      <div class="shine" style="width: {{tk.tankW}}px; height: {{tk.shineH}}px;"></div>
+      <div class="sand-hi" style="top: {{sandHiTop}}px; width: {{tk.tankW}}px;"></div>
+      <div class="sand" style="top: {{sandTopPx}}px; height: {{tk.sandH}}px; width: {{tk.tankW}}px;"></div>
+      <div class="weed w1" style="top: {{w1Top}}px; height: {{w1H}}px;"></div>
+      <div class="weed w2" style="top: {{w2Top}}px; height: {{w2H}}px;"></div>
+      <div class="weed w3" style="top: {{w3Top}}px; height: {{w3H}}px;"></div>
+      <div class="bub b1"></div>
+      <div class="bub b2"></div>
+      <div class="bub b3"></div>
+
+      <text class="empty" if="{{!got}}" style="top: {{emptyTop}}px; width: {{tk.tankW}}px; font-size: {{tk.emptySize}}px;">空缸 · 钓到星标鱼就能入缸</text>
+
+      <!--
+        每条鱼一个热区框（比鱼大 12px，指腹好点），框跟着鱼一起动。
+        onclick 用 $idx 取下标，再映射回 STARS 里的第几条 —— 中间隔着"只画已收集"的过滤。
+      -->
+      <div class="fw" for="{{fishes}}" onclick="pick($idx)"
+        style="left: {{$item.l}}px; top: {{$item.t}}px; width: {{$item.fw}}px; height: {{$item.fh}}px; border-color: {{$item.ring}};">
+        <image class="fw-img" src="{{$item.src}}" style="width: {{$item.w}}px; height: {{$item.h}}px;" />
+      </div>
+    </div>
+
+    <!--
+      选中一条时这块换成详情：名字 / 钓到时间 / 基础分。
+      时间单独占一行 —— 原来把它和「基础分」挤在同一行，13px 字塞 300px 宽，
+      真机上末尾会被截掉半截（看着像"没显示时间"），拆开就再也不会被挤掉。
+    -->
+    <div class="info" if="{{selOn}}" style="top: {{infoTop}}px; height: {{tk.infoH}}px;">
+      <text class="d-name" style="color: {{dColor}}; font-size: {{tk.nameSize}}px;">★ {{dName}} · {{dMap}}</text>
+      <text class="d-time" style="color: {{dTimeColor}}; font-size: {{tk.timeSize}}px;">{{dTimeText}}</text>
+      <text class="d-sub" style="font-size: {{tk.subSize}}px;">基础分 {{dValue}}</text>
+    </div>
+    <!-- 没选中时：上行是"怎么用"，下行是"还差什么"。空缸时上行换成一句引导，
+         不能和缸里那句「空缸 · 钓到星标鱼就能入缸」说同一件事 -->
+    <div class="info" else style="top: {{infoTop}}px; height: {{tk.infoH}}px;">
+      <text class="note" style="font-size: {{tk.noteSize}}px;">{{tipText}}</text>
+      <text class="miss" style="font-size: {{tk.missSize}}px;">{{missText}}</text>
+    </div>
+
+    <div class="back" style="top: {{backTop}}px; left: {{backL}}px; width: {{tk.backW}}px; height: {{tk.backH}}px; border-radius: {{tk.backR}}px;" onclick="goHome">
+      <text class="back-t" style="width: {{tk.backTxtW}}px; font-size: {{tk.backSize}}px;">返回主页</text>
+    </div>
+  </div>
+</template>
+
+<script>
+import storage from '@system.storage'
+import router from '@system.router'
+import { STARS, TANK_KEY, parseTank, fmtTime } from '../../common/star.js'
+import { SCREEN, screenH, probeScreen, onScreen } from '../../common/screen.js'
+import { tankSizes } from '../../common/pagesize.js'
+import { isNarrow } from '../../common/cardsize.js'
+
+const SWIPE_DX = 56 // 向右滑动的最小横向距离
+const SWIPE_DY = 44 // 纵向容差（判"基本水平"）
+const TAP_DX = 10 // 按下到抬起位移小于这个值 = 一次点击（不是滑）
+
+const FISH_PAD = 6 // 热区比鱼大多少（左右上下各 6，共 +12）
+const WEED_DX = 18 // 水草底端插进沙子里多少（三根都一样高，顶到同一条线）
+
+const TICK = 60 // 约 16fps，像素鱼慢慢游就够了；再快费电、也没更好看
+
+export default {
+  private: {
+    got: 0,
+    total: STARS.length,
+    fishes: [],
+    missText: '',
+    tipText: '点一下鱼看钓到的时间',
+    selOn: false,
+    dName: '',
+    dMap: '',
+    dValue: 0,
+    dTimeText: '',
+    dTimeColor: 'rgba(247, 201, 72, 0.95)',
+    dColor: '#f7c948',
+    // 多屏：整套尺寸见 common/pagesize.js，480 上是设计稿原值
+    tk: tankSizes(false),
+    narrow: false,
+    tankL: 15,
+    tankTop: 66,
+    infoTop: 330,
+    hdrTop: 4,
+    backTop: 410,
+    backL: 88,
+    // 缸内坐标（手指命中要先减掉这个偏移）
+    tankX: 18,
+    tankY: 69,
+    sandTop: 228,
+    // 沙地装饰的纵向位置，由 sandTop 推出来
+    sandHiTop: 228,
+    sandTopPx: 231,
+    emptyTop: 110,
+    w1Top: 186,
+    w1H: 60,
+    w2Top: 200,
+    w2H: 46,
+    w3Top: 190,
+    w3H: 56
+  },
+
+  onInit() {
+    const self = this
+
+    // 视口：缸体整组（缸 + 详情）在页头与返回键之间垂直居中；
+    // 336x480 上手算出来就是设计稿的 66 / 330 / 410，一个像素都不动。
+    // ★ 屏幕信息是异步兜底回来的（老固件走 getInfo 回调），届时画布高才从 480 跳到 824，
+    //   而鱼是按缸高铺的 —— 所以拿到新尺寸后必须按同一份收藏重铺一遍，
+    //   否则手环 11 上会出现"缸变大了、鱼还是 52x30 挤在左上角"。
+    this.entries = []
+    this.offScreen = onScreen(function () {
+      self.setViewport()
+      if (self.entries) self.apply(self.entries)
+    })
+    this.setViewport()
+    probeScreen()
+
+    this.tx0 = -1
+    this.ty0 = 0
+    this.tapAt = 0 // 上一次"点中鱼"的时刻，用来挡住随后冒泡上来的 click
+    this.leaving = false
+    this.loop = 0
+    this.sel = -1 // 选中鱼的 STARS 下标，-1 = 没选
+    this.raw = [] // 内部状态（带 y / 速度 / 相位），模板不直接读
+
+    // 先按"空缸"渲染一版（存储是异步回调，不能等它才出内容），
+    // 回调回来再刷成真实收藏 —— 顺序不能反，否则同步回调会被这行覆盖
+    this.apply([])
+
+    storage.get({
+      key: TANK_KEY,
+      default: '',
+      success: function (data) {
+        self.apply(parseTank(data))
+      },
+      fail: function () {
+        self.apply([])
+      }
+    })
+  },
+
+  onShow() {
+    this.startLoop()
+  },
+
+  onHide() {
+    this.stopLoop()
+  },
+
+  onDestroy() {
+    this.stopLoop()
+  },
+
+  /* ---------------- 把收藏铺成会游的鱼 ----------------
+   * entries 是 parseTank 出来的 [{ id, m, ts }]，只画已收集的那几条。
+   * 未收集的不画 —— 缸里放个 "?" 飘来飘去比空着更怪，缺哪条交给底部那行文字。
+   */
+  apply(entries) {
+    this.entries = entries // 屏幕尺寸变化后要按同一份收藏重铺（见 onInit）
+    const owned = {}
+    for (let i = 0; i < entries.length; i++) {
+      owned[entries[i].m] = entries[i]
+    }
+
+    const fishes = []
+    const missing = []
+    const tk = this.tk
+    let n = 0
+
+    for (let i = 0; i < STARS.length; i++) {
+      const s = STARS[i]
+      const rec = owned[i]
+      if (!rec) {
+        missing.push(s.map)
+        continue
+      }
+      n++
+
+      // 缩放：宽不超过 fishMaxW、高不超过 fishMaxH，海星/章鱼这类近方形的不会被压扁
+      // （手环 11 上放大到 78x44 —— 824 的画布上原来 52x30 的鱼只有 33x19 物理像素）
+      const scale = Math.min(tk.fishMaxW / s.w, tk.fishMaxH / s.h)
+      const w = Math.round(s.w * scale)
+      const h = Math.round(s.h * scale)
+      const dir = i % 2 === 0 ? 1 : -1
+
+      fishes.push({
+        i: i, // STARS 下标
+        w: w,
+        h: h,
+        fw: w + FISH_PAD * 2,
+        fh: h + FISH_PAD * 2,
+        lane: tk.laneTop + fishes.length * tk.laneGap,
+        y: tk.laneTop + fishes.length * tk.laneGap,
+        // 起点错开，别让七条鱼排成一列同时出发；两头各留 FISH_PAD，
+        // 这样鱼转身时选中框不会贴到缸壁上被裁掉一角
+        x: FISH_PAD + Math.round(((i * 0.37) % 1) * (tk.tankW - w - FISH_PAD * 2)),
+        dir: dir,
+        lastDir: dir,
+        spd: 0.55 + (i % 3) * 0.22,
+        ph: i * 0.9,
+        srcR: '/common/sprites/fish-' + s.m + '-star.png',
+        srcL: '/common/sprites/fish-' + s.m + '-star-l.png',
+        src: dir > 0 ? '/common/sprites/fish-' + s.m + '-star.png' : '/common/sprites/fish-' + s.m + '-star-l.png',
+        ts: rec.ts
+      })
+    }
+
+    this.got = n
+    if (n === 0) {
+      // 缸体里已经写着「空缸 · 钓到星标鱼就能入缸」，这两行就别重复它了
+      this.tipText = '七张地图 · 每张各有一条 ★'
+      this.missText = ''
+    } else if (missing.length === 0) {
+      this.missText = '七条集齐了 · 整缸都是星标鱼'
+    } else {
+      this.missText = '还差 ' + missing.length + ' 条：' + missing.slice(0, 2).join(' / ') + (missing.length > 2 ? ' 等' : '')
+    }
+    if (n > 0) this.tipText = '点一下鱼看钓到的时间'
+
+    this.raw = fishes
+    this.sel = -1
+    this.selOn = false
+    this.fishes = this.build(fishes)
+    if (fishes.length) this.startLoop()
+  },
+
+  /* 把内部状态翻成模板要的字段（模板不做算术） */
+  build(raw) {
+    const out = []
+    for (let i = 0; i < raw.length; i++) {
+      const f = raw[i]
+      out.push({
+        l: f.x - FISH_PAD,
+        t: Math.round(f.y) - FISH_PAD,
+        w: f.w,
+        h: f.h,
+        fw: f.fw,
+        fh: f.fh,
+        src: f.src,
+        ring: this.sel === f.i ? 'rgba(247, 201, 72, 0.85)' : 'rgba(0, 0, 0, 0)'
+      })
+    }
+    return out
+  },
+
+  startLoop() {
+    this.stopLoop()
+    if (!this.raw || !this.raw.length) return
+    const self = this
+    this.loop = setInterval(function () {
+      self.step()
+    }, TICK)
+  },
+
+  stopLoop() {
+    if (this.loop) {
+      clearInterval(this.loop)
+      this.loop = 0
+    }
+  },
+
+  /* 一帧：左右游 + 触边掉头 + 上下轻微起伏。
+   * 掉头而不是"从另一侧重生"：缸只有 300 宽，重生会像凭空冒出一条鱼；
+   * 也不许游出缸 —— 热区框越过容器虽然会被裁掉，但没必要冒这个险。 */
+  step() {
+    const raw = this.raw
+    if (!raw || !raw.length) return
+    const tankW = this.tk.tankW
+
+    for (let i = 0; i < raw.length; i++) {
+      const f = raw[i]
+      const minX = FISH_PAD
+      const maxX = tankW - f.w - FISH_PAD
+      let x = f.x + f.spd * f.dir
+      if (x <= minX) {
+        x = minX
+        f.dir = 1
+      } else if (x >= maxX) {
+        x = maxX
+        f.dir = -1
+      }
+      f.x = x
+
+      if (f.dir !== f.lastDir) {
+        f.lastDir = f.dir
+        f.src = f.dir > 0 ? f.srcR : f.srcL
+      }
+
+      f.ph += 0.12
+      let y = f.lane + Math.sin(f.ph) * 3
+      if (y < 0) y = 0
+      if (y > this.sandTop - f.h) y = this.sandTop - f.h
+      f.y = y
+    }
+
+    this.fishes = this.build(raw)
+  },
+
+  /* ---------------- 点鱼看详情 ----------------
+   * 两条入口都进这里：孩子节点的 click，以及 touchend 里自己算的命中（hitTest）。
+   * 真机上热区是个透明框，原生渲染的命中测试未必认它，所以不能只靠 click 一条路。
+   */
+  pick(idx, fromTouch) {
+    // 同一次点击会先后走"tap 判定"和"click 冒泡"两条路：220ms 内只认第一条，
+    // 否则等于连点两下 —— 选中立刻又被自己收起，看着就是"点了没反应"。
+    // 注意必须 `=== true`：模板里 onclick="pick($idx)" 编译出来是 `pick($idx, evt)`，
+    // 第二个参数在 click 那条路上是**事件对象**（恒为真），拿真假值判断等于永远不去抖。
+    if (fromTouch !== true && this.tapAt && Date.now() - this.tapAt < 220) return
+
+    const f = this.raw && this.raw[idx]
+    if (!f) return
+    const s = STARS[f.i]
+
+    // 再点同一条 = 收起详情（否则选中了就再也回不到"还差几条"）
+    if (this.sel === f.i) {
+      this.sel = -1
+      this.selOn = false
+      this.fishes = this.build(this.raw)
+      return
+    }
+
+    const t = fmtTime(f.ts)
+    this.sel = f.i
+    this.selOn = true
+    this.dName = s.name
+    this.dMap = s.map
+    this.dValue = s.value
+    this.dColor = s.color
+    // 老玩家的缸是 v2.6 之前写的两段格式，没有时间戳 —— 如实说"未记录"，
+    // 别把空字符串摆上去（那行会只剩"钓到于 "，更像坏了）
+    this.dTimeText = t ? '钓到于 ' + t : '钓到时间未记录'
+    this.dTimeColor = t ? 'rgba(247, 201, 72, 0.95)' : 'rgba(255, 255, 255, 0.38)'
+    this.fishes = this.build(this.raw)
+  },
+
+  /* 手指落在缸里哪条鱼上（屏幕坐标 → 缸内坐标 → 热区矩形）。
+   * 热区和渲染用的是同一组数（build 出的 l/t/fw/fh），不会出现"看着点在鱼上却点不中"。 */
+  hitTest(px, py) {
+    const mx = px - this.tankX
+    const my = py - this.tankY
+    const tankW = this.tk.tankW
+    if (mx < 0 || my < 0 || mx > tankW || my > this.sandTop + 28) return
+    const raw = this.raw || []
+    // 从上往下找：重叠时优先选视觉上更靠前的那条（模板里后面的画在上面）
+    for (let i = raw.length - 1; i >= 0; i--) {
+      const f = raw[i]
+      const l = f.x - FISH_PAD
+      const tp = Math.round(f.y) - FISH_PAD
+      if (mx >= l && mx <= l + f.fw && my >= tp && my <= tp + f.fh) {
+        this.pick(i, true)
+        return
+      }
+    }
+  },
+
+  /* ---------------- 返回主页 ---------------- */
+  onBackPress() {
+    this.goHome()
+    return true
+  },
+
+  goHome() {
+    if (this.leaving) return // 一次手势可能同时打到 onBackPress / touchend / onswipe
+    this.leaving = true
+    this.stopLoop()
+
+    let depth = -1
+    try {
+      const st = router.getState && router.getState()
+      if (st && typeof st.index === 'number') depth = st.index
+    } catch (e) {}
+
+    if (depth === 0) {
+      try {
+        router.replace({ uri: '/' })
+        return
+      } catch (e) {}
+    }
+
+    try {
+      router.back()
+      return
+    } catch (e) {}
+    try {
+      router.replace({ uri: '/' })
+    } catch (e) {
+      this.leaving = false
+    }
+  },
+
+  /* ---------------- 侧滑手势 ---------------- */
+  onTouchStart(e) {
+    const t = (e.touches && e.touches[0]) || (e.changedTouches && e.changedTouches[0])
+    if (!t) return
+    this.tx0 = t.clientX
+    this.ty0 = t.clientY
+  },
+
+  onTouchEnd(e) {
+    if (this.tx0 < 0) return
+    const t = (e.changedTouches && e.changedTouches[0]) || (e.touches && e.touches[0])
+    if (!t) return
+    const dx = t.clientX - this.tx0
+    const dy = t.clientY - this.ty0
+    const x0 = this.tx0
+    const y0 = this.ty0
+    this.tx0 = -1
+    if (dx >= SWIPE_DX && Math.abs(dy) <= SWIPE_DY) {
+      this.goHome()
+      return
+    }
+    // 位移很小 = 一次点击：自己算命中。
+    // 不指望孩子节点的 click —— 热区框本身是透明的，原生渲染里它可能压根不参与命中，
+    // 这正是"点鱼没反应"的根因之一。tapAt 用来挡住随后冒泡上来的 click。
+    if (Math.abs(dx) <= TAP_DX && Math.abs(dy) <= TAP_DX) {
+      this.tapAt = Date.now()
+      this.hitTest(x0, y0)
+    }
+  },
+
+  onSwipe(e) {
+    if (e && e.direction === 'right') this.goHome()
+  },
+
+  // 纵向布局：页头贴顶（胶囊屏躲圆角），缸体居中，返回键贴底
+  setViewport() {
+    const vh = screenH()
+    this.vh = vh
+    this.narrow = isNarrow(SCREEN.realW)
+    const tk = tankSizes(this.narrow)
+    this.tk = tk
+
+    this.hdrTop = tk.hdrMt + SCREEN.padTop
+
+    /* 「缸 + 详情」整组在页头下沿与返回键之间垂直居中。
+     * 480 上算出来还是设计稿的 66 / 330 / 410，一个像素都不动；
+     * 824 上缸高 460，整组落在 108..686，上下留白才对称。 */
+    const topPad = this.narrow ? 100 : 70
+    const botPad = this.narrow ? 132 : 76
+    const groupH = tk.tankH + 6 + tk.infoH
+    this.tankTop = SCREEN.extra > 0
+      ? topPad + Math.round((vh - topPad - botPad - groupH) / 2)
+      : 66
+    // 缸宽 + 左右各 3 的边框整体居中：(336 - 306) / 2 = 15
+    this.tankL = Math.round((SCREEN.w - tk.tankW - 6) / 2)
+    // 缸内原点（手指坐标 → 缸内坐标）和详情块位置
+    this.tankX = this.tankL + 3
+    this.tankY = this.tankTop + 3
+    this.infoTop = this.tankTop + tk.tankH + 8
+
+    // 沙地贴着缸底：沙体 sandH + 顶上 3px 亮线；鱼不许游进沙里
+    this.sandTop = tk.tankH - tk.sandH - 3
+    this.sandHiTop = this.sandTop
+    this.sandTopPx = this.sandTop + 3
+    // 空缸提示压在水域正中（不是沙子正中）
+    this.emptyTop = Math.round((tk.tankH - tk.sandH) / 2) - 6
+
+    // 三根水草：底端插进沙子 WEED_DX，顶到同一条线
+    this.w1H = tk.weedH[0]
+    this.w1Top = this.sandTop + WEED_DX - this.w1H
+    this.w2H = tk.weedH[1]
+    this.w2Top = this.sandTop + WEED_DX - this.w2H
+    this.w3H = tk.weedH[2]
+    this.w3Top = this.sandTop + WEED_DX - this.w3H
+
+    // 返回胶囊贴底：480 → 410，824 → 692（离下沿 48，躲开胶囊屏圆角）
+    this.backTop = vh - tk.backBottom - tk.backH
+    this.backL = Math.round((SCREEN.w - tk.backW) / 2)
+  }
+}
+</script>
+
+<style>
+.page {
+  position: relative;
+  width: 336px;
+  height: 480px;
+  flex-direction: column;
+  align-items: center;
+  overflow: hidden;
+  background-color: #08131a;
+}
+
+/* 页头与缸体都绝对定位：鱼在动、详情卡有/无，流式排版会互相顶 */
+.hdr {
+  position: absolute;
+  left: 18px;
+  top: 4px;
+  width: 300px;
+  flex-direction: column;
+  align-items: center;
+}
+
+.hdr-t {
+  width: 300px;
+  text-align: center;
+  color: #f7c948;
+  font-size: 30px;
+  font-weight: bold;
+  letter-spacing: 2px;
+}
+
+.hdr-s {
+  width: 300px;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 14px;
+  margin-top: 2px;
+}
+
+/* ---------------- 缸体 ----------------
+ * 内容区 300x256 + 3px 边框 = 306x262，居中 left 15 / top 66
+ */
+.tank {
+  position: absolute;
+  left: 15px;
+  top: 66px;
+  width: 300px;
+  height: 256px;
+  border-width: 3px;
+  border-style: solid;
+  border-color: #2c5a68;
+  border-radius: 10px;
+  overflow: hidden;
+  background-color: #0b2230;
+}
+
+/* 水：上浅下深的两层，比单色更像缸 */
+.water {
+  position: absolute;
+  left: 0px;
+  top: 0px;
+  width: 300px;
+  height: 256px;
+  background-color: #0d2a36;
+}
+
+.surface {
+  position: absolute;
+  left: 0px;
+  top: 0px;
+  width: 300px;
+  height: 5px;
+  background-color: #3d8fa8;
+}
+
+/* 水面下的第一层水比深处亮一点，缸才有纵深（纯色看着像一块黑板） */
+.shine {
+  position: absolute;
+  left: 0px;
+  top: 5px;
+  width: 300px;
+  height: 54px;
+  background-color: #123a49;
+}
+
+/* 沙地：底下 28px，顶上一条亮线。只有一色的话和深水对比太小，缸看起来像没铺底 */
+.sand-hi {
+  position: absolute;
+  left: 0px;
+  top: 228px;
+  width: 300px;
+  height: 3px;
+  background-color: #3d525d;
+}
+
+.sand {
+  position: absolute;
+  left: 0px;
+  top: 231px;
+  width: 300px;
+  height: 25px;
+  background-color: #2a3a43;
+}
+
+/* 水草：三根高度不同的柱，压在最底层（z 序靠写在前面，鱼在后面才盖住它们） */
+.weed {
+  position: absolute;
+  width: 6px;
+  background-color: #1f6b52;
+}
+
+.w1 {
+  left: 22px;
+  top: 186px;
+  height: 60px;
+}
+
+.w2 {
+  left: 40px;
+  top: 200px;
+  height: 46px;
+  background-color: #17553f;
+}
+
+.w3 {
+  left: 258px;
+  top: 190px;
+  height: 56px;
+}
+
+/* 气泡：贴着缸顶（静态，别和游动的鱼抢注意力） */
+.bub {
+  position: absolute;
+  width: 5px;
+  height: 5px;
+  border-radius: 3px;
+  background-color: rgba(190, 240, 255, 0.28);
+}
+
+.b1 {
+  left: 262px;
+  top: 12px;
+}
+
+.b2 {
+  left: 276px;
+  top: 22px;
+}
+
+.b3 {
+  left: 28px;
+  top: 16px;
+}
+
+/* 空缸时的提示，居中压在水上 */
+.empty {
+  position: absolute;
+  left: 0px;
+  top: 110px;
+  width: 300px;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.35);
+  font-size: 15px;
+}
+
+/* 鱼的热区：比鱼大 12px，边框默认透明，选中时变金。
+ * 背景给一层几乎看不见的白（alpha 0.02）—— 有绘制内容的节点才稳定参与命中测试，
+ * 纯透明的容器在真机上点了可能没反应。 */
+.fw {
+  position: absolute;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  border-width: 2px;
+  border-style: solid;
+  border-radius: 8px;
+  background-color: rgba(255, 255, 255, 0.02);
+}
+
+/* ---------------- 详情 / 说明 ----------------
+ * 固定 300x72 放在缸下沿，两种状态共用一个框，换内容不换高度
+ */
+.info {
+  position: absolute;
+  left: 18px;
+  top: 330px;
+  width: 300px;
+  height: 72px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.d-name {
+  width: 300px;
+  text-align: center;
+  font-size: 17px;
+  font-weight: bold;
+}
+
+/* 钓到的时间：单独一行、字号比正文大一档 —— 这是玩家点开的唯一目的 */
+.d-time {
+  width: 300px;
+  text-align: center;
+  font-size: 15px;
+  font-weight: bold;
+  margin-top: 4px;
+}
+
+.d-sub {
+  width: 300px;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.42);
+  font-size: 12px;
+  margin-top: 3px;
+}
+
+.note {
+  width: 300px;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 13px;
+}
+
+.miss {
+  width: 300px;
+  text-align: center;
+  color: rgba(247, 201, 72, 0.8);
+  font-size: 14px;
+  margin-top: 5px;
+}
+
+/* 返回胶囊（圆角 = 高度的一半，改高度要一起改） */
+.back {
+  position: absolute;
+  left: 88px;
+  top: 410px;
+  width: 160px;
+  height: 48px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-width: 2px;
+  border-style: solid;
+  border-color: #f7c948;
+  border-radius: 24px;
+}
+
+.back-t {
+  width: 150px;
+  text-align: center;
+  color: #f7c948;
+  font-size: 17px;
+  font-weight: bold;
+}
+</style>

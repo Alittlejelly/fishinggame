@@ -1,0 +1,373 @@
+<template>
+  <!--
+    等级页：独立页面（router.push 进来），不是弹窗。
+    布局约定（和 fishing.ux / about.ux 一样，真机踩过的坑）：
+      · 每个容器显式 flex-direction
+      · text 给死宽度 + text-align，否则 align-items:center 下会缩成一个字宽、逐字换行
+      · 靠 margin 撑开，根节点 overflow: hidden
+  -->
+  <div class="page" style="height: {{vh}}px;" ontouchstart="onTouchStart" ontouchend="onTouchEnd" onswipe="onSwipe">
+
+    <div class="bar" style="background-color: {{color}};"></div>
+
+    <div class="hdr" style="margin-top: {{sz.hdrMt}}px; width: {{sz.heroW}}px;">
+      <text class="hdr-t" style="width: {{sz.heroW}}px; font-size: {{sz.hdrT}}px; color: {{color}};">等级</text>
+      <text class="hdr-s" style="width: {{sz.heroW}}px; font-size: {{sz.hdrS}}px;">每 15 级换一个徽章 · 积分累计</text>
+    </div>
+
+    <!-- 当前等级：大徽章 + LV + 总积分 + 本级进度条（尺寸见 pagesize.js 的 levelSizes） -->
+    <div class="hero" style="border-color: {{color}}; width: {{sz.heroW}}px; height: {{sz.heroH}}px; margin-top: {{sz.heroMt}}px;">
+      <image class="hero-badge" src="{{badgeBig}}" style="width: {{sz.badge}}px; height: {{sz.badge}}px;" />
+      <div class="hero-info" style="width: {{sz.infoW}}px;">
+        <text class="hero-lv" style="width: {{sz.infoW}}px; font-size: {{sz.lv}}px; color: {{color}};">LV {{level}}</text>
+        <text class="hero-tier" style="width: {{sz.infoW}}px; font-size: {{sz.tier}}px;">{{tierName}} · 总积分 {{total}}</text>
+        <div class="hero-bar" style="width: {{sz.infoW}}px; height: {{sz.barH}}px; margin-top: {{sz.barMt}}px;">
+          <div class="hero-fill" style="height: {{sz.barH}}px; width: {{barW}}px; background-color: {{color}};"></div>
+        </div>
+        <text class="hero-next" style="width: {{sz.infoW}}px; font-size: {{sz.next}}px;">{{nextText}}</text>
+      </div>
+    </div>
+
+    <text class="sec" style="width: {{sz.heroW}}px; font-size: {{sz.secSize}}px; margin-top: {{sz.secMt}}px;">徽章</text>
+
+    <!--
+      9 档徽章排成 3x3。不用 flex-wrap（Vela 上没把握），
+      改成一"行"一个容器、每行固定三格，模板里就不会有嵌套 for。
+    -->
+    <div class="grow" for="{{rows}}" style="width: {{sz.heroW}}px; margin-top: {{sz.rowMt}}px;">
+      <div class="cell" style="border-color: {{$item.a.border}}; width: {{sz.cellW}}px; height: {{sz.cellH}}px; margin-left: {{sz.cellMl}}px; margin-right: {{sz.cellMl}}px;">
+        <image class="cell-badge" src="{{$item.a.src}}" style="width: {{sz.cellBadge}}px; height: {{sz.cellBadge}}px;" />
+        <text class="cell-lv" style="width: {{sz.cellW}}px; font-size: {{sz.cellLv}}px; color: {{$item.a.color}};">{{$item.a.label}}</text>
+      </div>
+      <div class="cell" style="border-color: {{$item.b.border}}; width: {{sz.cellW}}px; height: {{sz.cellH}}px; margin-left: {{sz.cellMl}}px; margin-right: {{sz.cellMl}}px;">
+        <image class="cell-badge" src="{{$item.b.src}}" style="width: {{sz.cellBadge}}px; height: {{sz.cellBadge}}px;" />
+        <text class="cell-lv" style="width: {{sz.cellW}}px; font-size: {{sz.cellLv}}px; color: {{$item.b.color}};">{{$item.b.label}}</text>
+      </div>
+      <div class="cell" style="border-color: {{$item.c.border}}; width: {{sz.cellW}}px; height: {{sz.cellH}}px; margin-left: {{sz.cellMl}}px; margin-right: {{sz.cellMl}}px;">
+        <image class="cell-badge" src="{{$item.c.src}}" style="width: {{sz.cellBadge}}px; height: {{sz.cellBadge}}px;" />
+        <text class="cell-lv" style="width: {{sz.cellW}}px; font-size: {{sz.cellLv}}px; color: {{$item.c.color}};">{{$item.c.label}}</text>
+      </div>
+    </div>
+
+    <!-- 底部固定位置：不参与上面的流式排版 -->
+    <div class="back" style="border-color: {{color}}; left: {{backL}}px; top: {{backTop}}px; width: {{sz.backW}}px; height: {{sz.backH}}px;" onclick="goHome">
+      <text class="back-t" style="width: {{sz.backTxtW}}px; font-size: {{sz.backSize}}px; color: {{color}};">返回主页</text>
+    </div>
+  </div>
+</template>
+
+<script>
+import storage from '@system.storage'
+import router from '@system.router'
+import { levelInfo, badgeSrc, TIERS, LV_PER_TIER, LEVEL_KEY } from '../../common/level.js'
+import { SCREEN, screenH, probeScreen, onScreen } from '../../common/screen.js'
+import { levelSizes } from '../../common/pagesize.js'
+import { isNarrow } from '../../common/cardsize.js'
+
+const SWIPE_DX = 56 // 向右滑动的最小横向距离
+const SWIPE_DY = 44 // 纵向容差（判"基本水平"）
+
+export default {
+  private: {
+    color: '#d9a05e',
+    tierName: '木牌',
+    level: 1,
+    total: 0,
+    badgeBig: '/common/sprites/lv-0-b.png',
+    barW: 0,
+    nextText: '',
+    // 多屏：页面高度、整套尺寸、返回键位置都随设备算（见 setViewport）
+    vh: 480,
+    sz: levelSizes(false),
+    backTop: 408,
+    backL: 88,
+    // 3 行 x 3 格，每格预先把 src / 文案 / 颜色算好（模板只读，不再算）
+    rows: []
+  },
+
+  onInit() {
+    const self = this
+
+    // 视口：内容仍然贴顶排，只有"返回键"贴底 —— 屏幕越高，中间留给徽章墙的空白越多
+    this.offScreen = onScreen(function () {
+      self.setViewport()
+    })
+    this.setViewport()
+    probeScreen()
+
+    // 先按 0 分渲染一版（存储是异步回调，不能等它才出内容），
+    // 回调回来再刷成真实等级 —— 顺序不能反，否则同步回调会被这行覆盖
+    this.apply(0)
+
+    storage.get({
+      key: LEVEL_KEY,
+      default: '0',
+      success: function (data) {
+        self.apply(parseInt(data, 10) || 0)
+      },
+      fail: function () {
+        self.apply(0)
+      }
+    })
+
+    this.tx0 = -1
+    this.ty0 = 0
+    this.leaving = false
+  },
+
+  setViewport() {
+    const vh = screenH()
+    this.vh = vh
+    const sz = levelSizes(isNarrow(SCREEN.realW))
+    this.sz = sz
+    // 返回键贴底：480 → 408（离下沿 22）、824 → 692（离下沿 48，躲胶囊屏圆角）
+    this.backTop = vh - sz.backBottom - sz.backH
+    this.backL = Math.round((SCREEN.w - sz.backW) / 2)
+    // 尺寸变了，进度条长度也要按新的 infoW 重算（屏幕信息是异步回来的）
+    if (this.percent != null) this.barW = Math.round(sz.infoW * (this.percent / 100))
+  },
+
+  onDestroy() {
+    if (this.offScreen) this.offScreen()
+  },
+
+  /* ---------------- 等级 → 页面字段 ---------------- */
+  apply(total) {
+    const info = levelInfo(total)
+    this.total = info.total
+    this.level = info.level
+    this.tierName = info.tierName
+    this.color = info.color
+    this.badgeBig = badgeSrc(info.tier, 'b')
+    this.percent = info.percent
+    // 进度条宽度跟着 infoW 走（窄屏 180、宽屏 200），写死 200 会顶出卡片
+    this.barW = Math.round(this.sz.infoW * (info.percent / 100))
+    this.nextText = info.isMax ? '已达最高等级' : '还差 ' + info.toNext + ' 分升级'
+
+    // 徽章墙：当前档描边用档位色，其余用很淡的白边
+    const cells = TIERS.map(function (t, i) {
+      const from = i * LV_PER_TIER + 1
+      return {
+        src: badgeSrc(i, 's'),
+        label: 'Lv' + from + '-' + (from + LV_PER_TIER - 1),
+        color: t.color,
+        border: i === info.tier ? t.color : 'rgba(255, 255, 255, 0.12)'
+      }
+    })
+    this.rows = [
+      { a: cells[0], b: cells[1], c: cells[2] },
+      { a: cells[3], b: cells[4], c: cells[5] },
+      { a: cells[6], b: cells[7], c: cells[8] }
+    ]
+  },
+
+  /* ---------------- 返回主页 ---------------- */
+  onBackPress() {
+    this.goHome()
+    return true
+  },
+
+  goHome() {
+    if (this.leaving) return // 一次手势可能同时打到 onBackPress / touchend / onswipe
+    this.leaving = true
+
+    let depth = -1
+    try {
+      const st = router.getState && router.getState()
+      if (st && typeof st.index === 'number') depth = st.index
+    } catch (e) {}
+
+    if (depth === 0) {
+      try {
+        router.replace({ uri: '/' })
+        return
+      } catch (e) {}
+    }
+
+    try {
+      router.back()
+      return
+    } catch (e) {}
+    try {
+      router.replace({ uri: '/' })
+    } catch (e) {
+      this.leaving = false
+    }
+  },
+
+  /* ---------------- 侧滑手势 ---------------- */
+  onTouchStart(e) {
+    const t = (e.touches && e.touches[0]) || (e.changedTouches && e.changedTouches[0])
+    if (!t) return
+    this.tx0 = t.clientX
+    this.ty0 = t.clientY
+  },
+
+  onTouchEnd(e) {
+    if (this.tx0 < 0) return
+    const t = (e.changedTouches && e.changedTouches[0]) || (e.touches && e.touches[0])
+    if (!t) return
+    const dx = t.clientX - this.tx0
+    const dy = t.clientY - this.ty0
+    this.tx0 = -1
+    if (dx >= SWIPE_DX && Math.abs(dy) <= SWIPE_DY) this.goHome()
+  },
+
+  onSwipe(e) {
+    if (e && e.direction === 'right') this.goHome()
+  }
+}
+</script>
+
+<style>
+.page {
+  width: 336px;
+  height: 480px;
+  flex-direction: column;
+  align-items: center;
+  overflow: hidden;
+  background-color: #0b0f0c;
+}
+
+.bar {
+  position: absolute;
+  left: 0px;
+  top: 0px;
+  width: 336px;
+  height: 4px;
+}
+
+.hdr {
+  width: 296px;
+  flex-direction: column;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.hdr-t {
+  width: 296px;
+  text-align: center;
+  font-size: 34px;
+  letter-spacing: 2px;
+}
+
+.hdr-s {
+  width: 296px;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 14px;
+  margin-top: 2px;
+}
+
+/* 当前等级卡片：大徽章在左，右边四行信息 */
+.hero {
+  width: 300px;
+  height: 96px;
+  margin-top: 8px;
+  flex-direction: row;
+  align-items: center;
+  border-width: 2px;
+  border-style: solid;
+  background-color: #10161a;
+}
+
+.hero-badge {
+  margin-left: 2px;
+}
+
+.hero-info {
+  width: 200px;
+  margin-left: 8px;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.hero-lv {
+  width: 200px;
+  font-size: 30px;
+  font-weight: bold;
+}
+
+.hero-tier {
+  width: 200px;
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 14px;
+  margin-top: 1px;
+}
+
+.hero-bar {
+  width: 200px;
+  height: 8px;
+  margin-top: 5px;
+  background-color: rgba(255, 255, 255, 0.14);
+  flex-direction: row;
+}
+
+.hero-fill {
+  height: 8px;
+}
+
+.hero-next {
+  width: 200px;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 13px;
+  margin-top: 3px;
+}
+
+.sec {
+  width: 300px;
+  text-align: left;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 14px;
+  margin-top: 8px;
+}
+
+.grow {
+  width: 300px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  margin-top: 2px;
+}
+
+.cell {
+  width: 96px;
+  height: 62px;
+  margin-left: 2px;
+  margin-right: 2px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-width: 2px;
+  border-style: solid;
+  background-color: #12171a;
+}
+
+.cell-lv {
+  width: 92px;
+  text-align: center;
+  font-size: 12px;
+  margin-top: 1px;
+}
+
+/* 返回按钮：底部那行"右滑屏幕也可以返回"去掉后，按钮下移并长高，指腹更好落点 */
+.back {
+  position: absolute;
+  left: 88px;
+  top: 408px;
+  width: 160px;
+  height: 50px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-width: 2px;
+  border-style: solid;
+}
+
+.back-t {
+  width: 150px;
+  text-align: center;
+  font-size: 18px;
+  font-weight: bold;
+}
+</style>

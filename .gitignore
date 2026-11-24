@@ -1,0 +1,14 @@
+# 依赖
+node_modules/
+
+# toolkit 构建中间产物（每次 build 都会重建）
+build/
+.temp_*/
+
+# 预览与场景图：由 node tools/preview.mjs 生成
+preview/
+
+# 杂项
+*.log
+.DS_Store
+Thumbs.db

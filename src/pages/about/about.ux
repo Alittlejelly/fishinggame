@@ -1,0 +1,407 @@
+<template>
+  <!--
+    关于页：独立页面（router.push 进来），不是弹窗遮罩。
+    布局约定（和 fishing.ux 一样，真机踩过的坑）：
+      · 每个容器显式 flex-direction
+      · text 给死宽度 + text-align，否则 align-items:center 下会缩成一个字宽、逐字换行
+      · 靠 margin 撑开，根节点 overflow: hidden
+  -->
+  <div class="page" style="height: {{vh}}px;" ontouchstart="onTouchStart" ontouchend="onTouchEnd" onswipe="onSwipe">
+
+    <div class="bar" style="background-color: {{accent}};"></div>
+
+    <!-- 页头：左边应用 logo，右边标题两行。
+         尺寸全部来自 common/pagesize.js 的 aboutSizes()：
+         宽屏 34/15、窄屏 40/20（手环 11 的 20 设计单位 = 12.6 物理像素，再小真看不清）。 -->
+    <div class="hdr" style="margin-top: {{ab.hdrMt}}px; margin-left: {{ab.hdrPadL}}px; width: {{ab.hdrW}}px;">
+      <image class="hdr-logo" src="/common/logo-48.png"
+        style="width: {{ab.logo}}px; height: {{ab.logo}}px; margin-right: {{ab.logoGap}}px;" />
+      <div class="hdr-txt" style="width: {{ab.hdrTW}}px;">
+        <text class="hdr-t" style="width: {{ab.hdrTW}}px; font-size: {{ab.tSize}}px; color: {{accent}};">关于</text>
+        <text class="hdr-s" style="width: {{ab.hdrTW}}px; font-size: {{ab.sSize}}px;">{{ab.sub}}</text>
+      </div>
+    </div>
+
+    <div class="card" style="border-color: {{border}}; width: {{ab.contentW}}px; margin-top: {{ab.cardMt}}px; padding-top: {{ab.cardPad}}px; padding-bottom: {{ab.cardPad}}px;">
+      <text class="app-name" style="width: {{ab.innerW}}px; font-size: {{ab.nameSize}}px;">像素钓鱼</text>
+      <text class="app-ver" style="width: {{ab.innerW}}px; font-size: {{ab.verSize}}px;">{{ver}}</text>
+    </div>
+
+    <!-- 四条玩法放一个 column 容器里：只用一个 class，避免依赖"多 class 合并"这种不确定行为。
+         窄屏的文案比宽屏短（26 的字号下 308 宽放不下 13 个字的原句），见 aboutSizes().tips -->
+    <div class="lis" style="width: {{ab.contentW}}px; margin-top: {{ab.lisMt}}px;">
+      <div class="li-row" for="{{ab.tips}}" style="width: {{ab.contentW}}px;">
+        <text class="li" style="width: {{ab.contentW}}px; font-size: {{ab.liSize}}px; margin-top: {{ab.liMt}}px;">{{$item}}</text>
+      </div>
+    </div>
+
+    <text class="sec" style="width: {{ab.contentW}}px; font-size: {{ab.secSize}}px; margin-top: {{ab.secMt}}px; color: {{accent}};">最高分</text>
+    <div class="rank" style="width: {{ab.contentW}}px; margin-top: {{ab.rkMt}}px;">
+      <text class="rk-l" style="width: {{ab.rkLW}}px; font-size: {{ab.rkL}}px;">{{bestName}}</text>
+      <text class="rk-v" style="width: {{ab.rkVW}}px; font-size: {{ab.rkV}}px; color: {{bestColor}};">{{bestScore}} 分</text>
+    </div>
+    <text class="rk-note" style="width: {{ab.contentW}}px; font-size: {{ab.noteSize}}px; margin-top: {{ab.noteMt}}px;">{{unlockLine}}</text>
+
+    <!-- 底部固定位置：不参与上面的流式排版，内容再多也不会把它顶出屏幕 -->
+    <div class="back" style="left: {{backL}}px; top: {{backTop}}px; width: {{ab.backW}}px; height: {{ab.backH}}px; border-color: {{accent}};" onclick="goHome">
+      <text class="back-t" style="width: {{ab.backTxtW}}px; font-size: {{ab.backSize}}px; color: {{accent}};">返回主页</text>
+    </div>
+  </div>
+</template>
+
+<script>
+import storage from '@system.storage'
+import router from '@system.router'
+import { levelInfo, LEVEL_KEY } from '../../common/level.js'
+import { SCREEN, screenH, probeScreen, onScreen } from '../../common/screen.js'
+import { aboutSizes } from '../../common/pagesize.js'
+import { isNarrow } from '../../common/cardsize.js'
+
+const BEST_KEY = 'band_pixel_fish_' // 和 fishing.ux 共用同一套 key
+const SWIPE_DX = 56               // 向右滑动的最小横向距离
+const SWIPE_DY = 44               // 纵向容差（判"基本水平"）
+
+// 地图名与配色：从 fishing.ux 的 THEMES 抄一份精简版（只有展示需要的字段）。
+// 加地图时这里要跟着补一行，needLv 与 fishing.ux 保持一致。
+const MAPS = [
+  { level: '初级', name: '青草池塘', color: '#8fe0a2', needLv: 1 },
+  { level: '中级', name: '碧波湖', color: '#79d8f5', needLv: 16 },
+  { level: '高级', name: '幽暗深海', color: '#bb93ff', needLv: 31 },
+  { level: '极寒', name: '极光冰海', color: '#8ff0ea', needLv: 46 },
+  { level: '秘林', name: '紫雾藻林', color: '#d98cff', needLv: 61 },
+  { level: '熔岩', name: '熔岩海沟', color: '#ff8a3c', needLv: 76 },
+  { level: '星海', name: '星海之底', color: '#cfe4ff', needLv: 91 }
+]
+
+export default {
+  private: {
+    accent: '#8fe0a2',
+    border: '#2f6b4a',
+    // 版本号：manifest.json 的 versionName 是唯一真源，这里只是显示；
+    // simulate.mjs 有一条断言比对两者，防止再出现"装的是 3.3、关于页写 3.1"
+    ver: 'v1.0.0',
+    bestName: '还没开张',
+    bestScore: 0,
+    bestColor: '#8fe0a2',
+    unlockLine: '已解锁 1 / 7 张地图',
+    // 多屏：页面高度、尺寸组、返回键位置
+    vh: 480,
+    ab: aboutSizes(false),
+    backTop: 408,
+    backL: 88
+  },
+
+  onInit() {
+    const self = this
+
+    // 视口：返回键贴底（关于页只显示版本号，不再报机型）
+    this.offScreen = onScreen(function () {
+      self.setViewport()
+    })
+    this.setViewport()
+    probeScreen()
+
+    // 七张地图的最高分：不再逐行列出（480 高的屏幕上放不下 7 行），
+    // 只留"最佳的那张"一行 + 一行解锁进度。
+    let best = { score: 0, map: MAPS[0] }
+    let got = 0
+    MAPS.forEach(function (m, i) {
+      storage.get({
+        key: BEST_KEY + i,
+        default: '0',
+        success: function (data) {
+          const v = parseInt(data, 10) || 0
+          got++
+          if (v > best.score) best = { score: v, map: m }
+          if (got === MAPS.length) self.showBest(best)
+        }
+      })
+    })
+
+    // 解锁进度：按累计积分算等级，和主页面同一套规则（src/common/level.js）
+    storage.get({
+      key: LEVEL_KEY,
+      default: '0',
+      success: function (data) {
+        const lv = levelInfo(parseInt(data, 10) || 0).level
+        let n = 0
+        MAPS.forEach(function (m) {
+          if (lv >= m.needLv) n++
+        })
+        self.unlockLine = '已解锁 ' + n + ' / ' + MAPS.length + ' 张地图'
+      }
+    })
+
+    this.tx0 = -1   // 手势起点 x，-1 = 当前没有进行中的滑动
+    this.ty0 = 0
+    this.leaving = false
+  },
+
+  setViewport() {
+    const vh = screenH()
+    this.vh = vh
+    const narrow = isNarrow(SCREEN.realW)
+    const ab = aboutSizes(narrow)
+
+    /* 派生量（只在这一处算，模板不做算术）：
+     * contentW 内容区宽、innerW 卡片内文字宽、hdrTW 标题列宽、rkLW 左列宽。
+     * 480 上算出来是 296 / 260 / 236 / 188，和设计稿一个像素都不差。 */
+    ab.contentW = Math.round(SCREEN.w - ab.padX * 2)
+    ab.innerW = ab.contentW - 36
+    /* 页头单独缩进（窄屏 68）：屏顶是半圆，d=34 处左右各只有 67 号位可用，
+     * logo 摆 14 会被弧线切掉半边。宽屏 hdrPadL 就是 padX，数值不变。 */
+    const padL = ab.hdrPadL == null ? ab.padX : ab.hdrPadL
+    ab.hdrW = Math.round(SCREEN.w - padL - ab.padX)
+    ab.hdrTW = ab.hdrW - ab.logo - ab.logoGap
+    /* 分数列 108 → 132：36 号字下「128 分」要 110，四位数的分数还要再宽一点。
+     * 左侧地图名因此收窄到 168 —— 所以窄屏只写地名（见 showBest），
+     * "初级 · 青草池塘" 六个字在 31 号字下要 181，塞不进 168。 */
+    ab.rkVW = narrow ? 132 : 100
+    ab.rkLW = ab.contentW - ab.rkVW - 8
+    this.ab = ab
+
+    // 返回键贴底：480 → 408（离下沿 20）、824 → 692（离下沿 48，躲胶囊屏圆角）
+    this.backTop = vh - ab.backBottom - ab.backH
+    this.backL = Math.round((SCREEN.w - ab.backW) / 2)
+  },
+
+  onDestroy() {
+    if (this.offScreen) this.offScreen()
+  },
+
+  showBest(best) {
+    // 窄屏只写地名：31 号字下「初级 · 青草池塘」要 181 宽，左列只有 168
+    // （和窄屏卡片同理，卡名也是只留地名）
+    const narrow = isNarrow(SCREEN.realW)
+    this.bestName = best.score > 0
+      ? (narrow ? best.map.name : best.map.level + ' · ' + best.map.name)
+      : '还没开张'
+    this.bestScore = best.score
+    this.bestColor = best.map.color
+    this.accent = best.map.color
+  },
+
+  /* ---------------- 返回主页 ----------------
+   * 系统返回（侧滑）：Vela 先问页面 onBackPress，return true = 自己处理
+   */
+  onBackPress() {
+    this.goHome()
+    return true
+  },
+
+  goHome() {
+    if (this.leaving) return // 一次手势可能同时打到 onBackPress / touchend / onswipe
+    this.leaving = true
+
+    // 先看页面栈里自己是不是第一个：index 0 = 没有上一页，back() 会什么都不做，
+    // 那种情况（比如从别的入口直接拉起关于页）用 replace 回主页兜底。
+    let depth = -1
+    try {
+      const st = router.getState && router.getState()
+      if (st && typeof st.index === 'number') depth = st.index
+    } catch (e) {}
+
+    if (depth === 0) {
+      try {
+        router.replace({ uri: '/' })
+        return
+      } catch (e) {}
+    }
+
+    try {
+      router.back()
+      return
+    } catch (e) {}
+    // back() 抛错（老固件没有页面栈）时同样兜底回主页
+    try {
+      router.replace({ uri: '/' })
+    } catch (e) {
+      this.leaving = false // 都没成功就允许重试，别把用户卡在关于页
+    }
+  },
+
+  /* ---------------- 侧滑手势 ---------------- */
+  onTouchStart(e) {
+    const t = (e.touches && e.touches[0]) || (e.changedTouches && e.changedTouches[0])
+    if (!t) return
+    this.tx0 = t.clientX
+    this.ty0 = t.clientY
+  },
+
+  onTouchEnd(e) {
+    if (this.tx0 < 0) return
+    const t = (e.changedTouches && e.changedTouches[0]) || (e.touches && e.touches[0])
+    if (!t) return
+    const dx = t.clientX - this.tx0
+    const dy = t.clientY - this.ty0
+    this.tx0 = -1
+    if (dx >= SWIPE_DX && Math.abs(dy) <= SWIPE_DY) this.goHome()
+  },
+
+  // 兜底：部分固件 touchmove 不连续，用系统 swipe 事件再补一次
+  onSwipe(e) {
+    if (e && e.direction === 'right') this.goHome()
+  }
+}
+</script>
+
+<style>
+.page {
+  width: 336px;
+  height: 480px;
+  flex-direction: column;
+  align-items: center;
+  overflow: hidden;
+  background-color: #0b0f0c;
+}
+
+.bar {
+  position: absolute;
+  left: 0px;
+  top: 0px;
+  width: 336px;
+  height: 4px;
+}
+
+.hdr {
+  width: 296px;
+  flex-direction: row;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.hdr-logo {
+  margin-right: 12px;
+}
+
+/* 标题列：给死宽度 + 左对齐（row 里的 column 不给宽会缩成最宽那行的宽度） */
+.hdr-txt {
+  width: 236px;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.hdr-t {
+  width: 236px;
+  text-align: left;
+  font-size: 34px;
+  letter-spacing: 2px;
+}
+
+.hdr-s {
+  width: 236px;
+  text-align: left;
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 15px;
+  letter-spacing: 1px;
+  margin-top: 2px;
+}
+
+.card {
+  width: 296px;
+  flex-direction: column;
+  align-items: center;
+  border-width: 2px;
+  border-style: solid;
+  margin-top: 6px;
+  padding-top: 9px;
+  padding-bottom: 9px;
+}
+
+.app-name {
+  width: 260px;
+  text-align: center;
+  color: #ffffff;
+  font-size: 32px;
+  letter-spacing: 2px;
+}
+
+.app-ver {
+  width: 260px;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 17px;
+  margin-top: 3px;
+}
+
+.sec {
+  width: 296px;
+  text-align: left;
+  font-size: 17px;
+  margin-top: 8px;
+}
+
+.li {
+  width: 296px;
+  text-align: left;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 18px;
+  margin-top: 5px;
+}
+
+/* 四条玩法：容器给上边距，每行再给一个上边距（宽屏 5/5，窄屏 12/14）。
+   每行套一个 .li-row 而不是直接对 text 写 for —— div 上挂 for 是老代码里验证过的写法。 */
+.lis {
+  width: 296px;
+  flex-direction: column;
+  margin-top: 5px;
+}
+
+.li-row {
+  width: 296px;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.rank {
+  width: 296px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 4px;
+}
+
+.rk-l {
+  width: 188px;
+  text-align: left;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 18px;
+}
+
+.rk-v {
+  width: 100px;
+  text-align: right;
+  font-size: 20px;
+}
+
+/* 解锁进度：跟最佳纪录同一块，比正文小一号，不抢视觉 */
+.rk-note {
+  width: 296px;
+  text-align: left;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 15px;
+  margin-top: 6px;
+}
+
+/* 返回按钮：原来上面压着一行"右滑屏幕也可以返回"，只能挤在 396。
+   提示行去掉后可以往下沉、也可以长高一点，手指更好点。 */
+.back {
+  position: absolute;
+  left: 88px;
+  top: 408px;
+  width: 160px;
+  height: 52px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-width: 2px;
+  border-style: solid;
+}
+
+.back-t {
+  width: 150px;
+  text-align: center;
+  font-size: 19px;
+  font-weight: bold;
+}
+</style>

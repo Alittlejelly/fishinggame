@@ -1,0 +1,5 @@
+# 统一换行：文本走自动转换，签名证书/位图/安装包按二进制原样存取
+* text=auto
+*.pem -text
+*.png -text
+*.rpk -text

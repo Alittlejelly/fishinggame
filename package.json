@@ -1,0 +1,14 @@
+{
+  "name": "mi-band-pro-fishing",
+  "version": "1.0.0",
+  "description": "像素钓鱼 · 小米手环 Vela JS 快应用（手环 10 Pro / 11）",
+  "scripts": {
+    "build": "node scripts/build.js build",
+    "release": "node scripts/build.js release",
+    "start": "aiot start",
+    "resign": "aiot resign"
+  },
+  "devDependencies": {
+    "aiot-toolkit": "^2.0.5"
+  }
+}
