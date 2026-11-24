@@ -1,0 +1,39 @@
+{
+  "item": {
+    "id": "com.cyh.fishinggame",
+    "restype": "quick_app",
+    "name": "像素钓鱼",
+    "description": "一款在小米手环上摸鱼（钓鱼）的小游戏，拥有完整的等级系统和成就系统，让你的摸鱼时间不在无聊！",
+    "preview": [
+      "media/overview.png",
+      "media/scene-1.png",
+      "media/v11_l.png",
+      "media/v11_t.png"
+    ],
+    "icon": "media/123.png",
+    "cover": "media/画板 2.jpg",
+    "author": [
+      {
+        "name": "bandbbs_83349",
+        "bindABAccount": true
+      }
+    ]
+  },
+  "links": [
+    {
+      "title": "爱发电链接",
+      "url": "https://ifdian.net/item/9c2c4d96e7eb11f184c252540025c377",
+      "icon": "cloud-arrow-down"
+    }
+  ],
+  "downloads": {
+    "xmb10p": {
+      "version": "1.0.0",
+      "file_name": "downloads/com.cyh.fishinggame.release.1.0.0.rpk",
+      "versionCode": 100
+    }
+  },
+  "ext": {
+    "enableAstroBoxCreatorFeatures": true
+  }
+}
